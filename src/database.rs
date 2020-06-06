@@ -1,45 +1,152 @@
 use crate::{Error, Result};
-use crossbeam::channel::Sender;
 use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs::{DirEntry, FileType, Metadata};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
-    root_path: PathBuf,
-    root_node: Node,
+    files: Vec<Entry>,
+    dirs: Vec<Entry>,
+    file_statuses: StatusVec,
+    dir_statuses: StatusVec,
 }
 
 impl<'a> Database {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let root_node = create_node(path.as_ref(), EntryInfo::from_path(path.as_ref())?);
-        Ok(Self {
-            root_node,
-            root_path: path.as_ref().to_path_buf(),
-        })
+        let entry_info = EntryInfo::from_path(path.as_ref())?;
+        let root = Entry {
+            name: entry_info.name,
+            parent: 0, // points to itself
+        };
+        let database = Self {
+            files: Vec::new(),
+            dirs: vec![root],
+            file_statuses: Default::default(),
+            dir_statuses: StatusVec {
+                ctime: vec![entry_info.status.ctime],
+                mtime: vec![entry_info.status.mtime],
+                size: vec![entry_info.status.size],
+            },
+        };
+
+        let database = Arc::new(Mutex::new(database));
+        walk_file_system(database.clone(), path.as_ref(), 0);
+
+        // safe to unwrap since create_node, which is the only user of database, has returned
+        Ok(Arc::try_unwrap(database).unwrap().into_inner().unwrap())
     }
 
-    pub fn search(&'a self, pattern: &Regex, tx: Sender<Hit<'a>>) -> Result<()> {
-        search(&self.root_node, &self.root_path, pattern, tx)
+    pub fn search(&self, pattern: &Regex, in_path: bool) -> Vec<Hit> {
+        search(&self, pattern, in_path)
+    }
+
+    pub fn path_from_hit(&self, hit: &Hit) -> PathBuf {
+        let mut buf = PathBuf::new();
+        let entry = match hit {
+            Hit::File(i) => &self.files[*i],
+            Hit::Directory(i) => &self.dirs[*i],
+        };
+        self.path_from_entry_impl(entry.parent, &mut buf);
+        buf.push(&entry.name);
+        buf
+    }
+
+    pub fn status_from_hit(&'a self, hit: &Hit) -> RefEntryStatus<'a> {
+        let (&i, status_vec) = match hit {
+            Hit::File(i) => (i, &self.file_statuses),
+            Hit::Directory(i) => (i, &self.dir_statuses),
+        };
+        RefEntryStatus {
+            ctime: &status_vec.ctime[i],
+            mtime: &status_vec.mtime[i],
+            size: status_vec.size[i],
+        }
+    }
+
+    fn push_file(&mut self, entry_info: EntryInfo, parent: usize) {
+        self.files.push(Entry {
+            name: entry_info.name,
+            parent,
+        });
+        self.file_statuses.ctime.push(entry_info.status.ctime);
+        self.file_statuses.mtime.push(entry_info.status.mtime);
+        self.file_statuses.size.push(entry_info.status.size);
+    }
+
+    fn push_dir(&mut self, entry_info: EntryInfo, parent: usize) {
+        self.dirs.push(Entry {
+            name: entry_info.name,
+            parent,
+        });
+        self.dir_statuses.ctime.push(entry_info.status.ctime);
+        self.dir_statuses.mtime.push(entry_info.status.mtime);
+        self.dir_statuses.size.push(entry_info.status.size);
+    }
+
+    fn path_from_entry(&self, entry: &Entry) -> PathBuf {
+        let mut buf = PathBuf::new();
+        self.path_from_entry_impl(entry.parent, &mut buf);
+        buf.push(&entry.name);
+        buf
+    }
+
+    fn path_from_entry_impl(&self, index: usize, mut buf: &mut PathBuf) {
+        let dir = &self.dirs[index];
+        if dir.parent == 0 {
+            buf.push(&self.dirs[dir.parent].name);
+        } else {
+            self.path_from_entry_impl(dir.parent, &mut buf);
+        }
+        buf.push(&dir.name);
     }
 }
 
-pub struct Hit<'a> {
-    pub path: PathBuf,
-    pub status: &'a FileStatus,
+pub enum Hit {
+    File(usize),
+    Directory(usize),
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct FileStatus {
-    pub ctime: SystemTime,
-    pub mtime: SystemTime,
+pub struct RefEntryStatus<'a> {
+    pub ctime: &'a SystemTime,
+    pub mtime: &'a SystemTime,
     pub size: u64,
 }
 
-impl FileStatus {
+#[derive(Debug, Serialize, Deserialize)]
+struct Entry {
+    name: String,
+    parent: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StatusVec {
+    ctime: Vec<SystemTime>,
+    mtime: Vec<SystemTime>,
+    size: Vec<u64>,
+}
+
+impl Default for StatusVec {
+    fn default() -> Self {
+        Self {
+            ctime: Vec::new(),
+            mtime: Vec::new(),
+            size: Vec::new(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct EntryStatus {
+    ctime: SystemTime,
+    mtime: SystemTime,
+    size: u64,
+}
+
+impl EntryStatus {
     fn from_metadata(metadata: &Metadata) -> Result<Self> {
         // metadata may contain invalid SystemTime
         // it will catch them as Err instead of panic
@@ -59,109 +166,10 @@ impl FileStatus {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-enum Node {
-    File {
-        name: String,
-        status: FileStatus,
-    },
-    Directory {
-        name: String,
-        status: FileStatus,
-        children: Vec<Node>,
-    },
-    Symlink {
-        name: String,
-        status: FileStatus,
-    },
-}
-
-impl Node {
-    fn new(entry_info: EntryInfo) -> Node {
-        let EntryInfo {
-            name,
-            ftype,
-            status,
-            ..
-        } = entry_info;
-
-        if ftype.is_file() {
-            Node::File { name, status }
-        } else if ftype.is_dir() {
-            Node::Directory {
-                name,
-                status,
-                children: Vec::new(),
-            }
-        } else if ftype.is_symlink() {
-            Node::Symlink { name, status }
-        } else {
-            unimplemented!()
-        }
-    }
-
-    fn name(&self) -> &str {
-        use Node::*;
-        match &self {
-            File { name, .. } | Directory { name, .. } | Symlink { name, .. } => name,
-        }
-    }
-
-    fn status(&self) -> &FileStatus {
-        use Node::*;
-        match &self {
-            File { status, .. } | Directory { status, .. } | Symlink { status, .. } => status,
-        }
-    }
-}
-
-fn create_node(path: &Path, entry_info: EntryInfo) -> Node {
-    let mut node = Node::new(entry_info);
-    if let Node::Directory { children, .. } = &mut node {
-        // ignore all the errors that occur during traversal
-        if let Ok(rd) = path.read_dir() {
-            children.par_extend(rd.collect::<Vec<_>>().par_iter().filter_map(|dent| {
-                dent.as_ref()
-                    .ok()
-                    .and_then(|dent| {
-                        EntryInfo::from_dir_entry(&dent)
-                            .ok()
-                            .map(|entry_info| (dent.path(), entry_info))
-                    })
-                    .map(|(path, entry_info)| create_node(&path, entry_info))
-            }))
-        }
-    }
-    node
-}
-
-fn search<'a>(node: &'a Node, path: &Path, pattern: &Regex, tx: Sender<Hit<'a>>) -> Result<()> {
-    if let Node::Directory { children, .. } = node {
-        children.par_iter().try_for_each_with(tx, |tx, child| {
-            let child_path = path.join(child.name());
-            if let Some(s) = child_path.to_str() {
-                if pattern.is_match(s) {
-                    tx.send(Hit {
-                        path: child_path.clone(),
-                        status: child.status(),
-                    })
-                    .map_err(|_| Error::ChannelSend)?;
-                }
-                if let Node::Directory { .. } = child {
-                    search(child, &child_path, pattern, tx.clone())?;
-                }
-            }
-            Ok(())
-        })
-    } else {
-        unreachable!()
-    }
-}
-
 struct EntryInfo {
     name: String,
     ftype: FileType,
-    status: FileStatus,
+    status: EntryStatus,
 }
 
 impl EntryInfo {
@@ -179,7 +187,7 @@ impl EntryInfo {
         Ok(Self {
             name,
             ftype,
-            status: FileStatus::from_metadata(&metadata)?,
+            status: EntryStatus::from_metadata(&metadata)?,
         })
     }
 
@@ -189,7 +197,79 @@ impl EntryInfo {
         Ok(Self {
             name,
             ftype: dent.file_type()?,
-            status: FileStatus::from_metadata(&dent.metadata()?)?,
+            status: EntryStatus::from_metadata(&dent.metadata()?)?,
         })
     }
+}
+
+fn walk_file_system(database: Arc<Mutex<Database>>, path: &Path, parent: usize) {
+    if let Ok(rd) = path.read_dir() {
+        let children = rd
+            .filter_map(|dent| {
+                dent.ok().and_then(|dent| {
+                    EntryInfo::from_dir_entry(&dent)
+                        .ok()
+                        .map(|entry_info| (dent.path(), entry_info))
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut sub_directories = Vec::new();
+        {
+            let mut db = database.lock().unwrap();
+            for (path, entry_info) in children {
+                if entry_info.ftype.is_dir() {
+                    sub_directories.push((path, db.dirs.len()));
+                    db.push_dir(entry_info, parent);
+                } else {
+                    db.push_file(entry_info, parent);
+                }
+            }
+        }
+
+        sub_directories
+            .par_iter()
+            .for_each_with(database, |database, (path, index)| {
+                walk_file_system(database.clone(), path, *index);
+            });
+    }
+}
+
+fn search(database: &Database, pattern: &Regex, in_path: bool) -> Vec<Hit> {
+    let match_file = |(i, entry)| {
+        if in_path {
+            if let Some(path) = database.path_from_entry(entry).to_str() {
+                if pattern.is_match(path) {
+                    return Some(Hit::File(i));
+                }
+            }
+        } else if pattern.is_match(&entry.name) {
+            return Some(Hit::File(i));
+        }
+        None
+    };
+
+    let match_dir = |(i, entry)| {
+        if in_path {
+            if let Some(path) = database.path_from_entry(entry).to_str() {
+                if pattern.is_match(path) {
+                    return Some(Hit::Directory(i));
+                }
+            }
+        } else if pattern.is_match(&entry.name) {
+            return Some(Hit::Directory(i));
+        }
+        None
+    };
+
+    let files = (0..database.files.len())
+        .into_par_iter()
+        .zip(database.files.par_iter())
+        .filter_map(match_file);
+    let dirs = (0..database.dirs.len())
+        .into_par_iter()
+        .zip(database.dirs.par_iter())
+        .filter_map(match_dir);
+
+    files.chain(dirs).collect()
 }
