@@ -3,6 +3,8 @@ mod text_box;
 use crate::worker::{Loader, Searcher};
 use crate::Opt;
 use anyhow::Result;
+use chrono::offset::Local;
+use chrono::DateTime;
 use crossbeam::channel::{self, Sender};
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
@@ -17,7 +19,7 @@ use text_box::{TextBox, TextBoxState};
 use tui::backend::CrosstermBackend;
 use tui::layout::{Constraint, Layout};
 use tui::style::{Color, Modifier, Style};
-use tui::widgets::{List, ListState, Paragraph, Text};
+use tui::widgets::{Paragraph, Row, Table, TableState, Text};
 use tui::Frame;
 use tui::Terminal;
 
@@ -142,21 +144,40 @@ impl<'a> TuiApp<'a> {
             ])
             .split(f.size());
 
-        // hits list
-        let items = self.hits.iter().filter_map(|hit| {
-            self.database
-                .as_ref()
-                .unwrap()
-                .path_from_hit(hit)
-                .to_str()
-                .map(|path| Text::raw(path.to_string()))
+        // hits table
+        let items = self.hits.iter().rev().map(|hit| {
+            let path = self.database.as_ref().unwrap().path_from_hit(&hit);
+            let status = self.database.as_ref().unwrap().status_from_hit(&hit);
+            let size_str = if self.opt.human_readable {
+                size::Size::Bytes(status.size)
+                    .to_string(size::Base::Base2, size::Style::Abbreviated)
+            } else {
+                format!("{}", status.size)
+            };
+            let mtime: DateTime<Local> = (*status.mtime).into();
+            Row::Data(
+                vec![
+                    path.file_name().unwrap().to_str().unwrap().to_string(),
+                    size_str,
+                    format!("{}", mtime.format("%Y/%m/%d %T")),
+                    path.to_str().unwrap().to_string(),
+                ]
+                .into_iter(),
+            )
         });
-        let list = List::new(items)
+        let table = Table::new(["Name", "Size", "Modified", "Path"].iter(), items)
+            .widths(&[
+                Constraint::Ratio(1, 3),
+                Constraint::Length(10),
+                Constraint::Length(20),
+                Constraint::Min(1),
+            ])
             .highlight_style(Style::default().fg(Color::Green).modifier(Modifier::BOLD))
             .highlight_symbol("> ");
-        let mut list_state = ListState::default();
-        list_state.select(Some(self.selected));
-        f.render_stateful_widget(list, chunks[0], &mut list_state);
+
+        let mut table_state = TableState::default();
+        table_state.select(Some(self.selected));
+        f.render_stateful_widget(table, chunks[0], &mut table_state);
 
         // status bar
         let text = [if self.database.is_none() {

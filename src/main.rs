@@ -28,6 +28,9 @@ pub struct Opt {
     regex: bool,
 
     #[structopt(short, long)]
+    human_readable: bool,
+
+    #[structopt(short, long)]
     update: bool,
 
     #[structopt(short, long, default_value = "database")]
