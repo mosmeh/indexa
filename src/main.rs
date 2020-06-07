@@ -47,7 +47,7 @@ fn main() -> Result<()> {
         .clone()
         .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow!("Cannot determine root directory to index"))?;
-    let threads = opt.threads.unwrap_or_else(num_cpus::get);
+    let threads = opt.threads.unwrap_or_else(|| num_cpus::get() - 1);
 
     ThreadPoolBuilder::new()
         .num_threads(threads)

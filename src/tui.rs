@@ -235,11 +235,7 @@ impl<'a> TuiApp<'a> {
 
     fn on_up(&mut self) -> Result<()> {
         if !self.hits.is_empty() {
-            self.selected = if self.selected == 0 {
-                self.hits.len() - 1
-            } else {
-                self.selected - 1
-            };
+            self.selected = self.selected.saturating_sub(1);
         }
 
         Ok(())
@@ -247,11 +243,7 @@ impl<'a> TuiApp<'a> {
 
     fn on_down(&mut self) -> Result<()> {
         if !self.hits.is_empty() {
-            self.selected = if self.selected >= self.hits.len() - 1 {
-                0
-            } else {
-                self.selected + 1
-            };
+            self.selected = (self.selected + 1).min(self.hits.len() - 1);
         }
 
         Ok(())
