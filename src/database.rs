@@ -47,14 +47,14 @@ impl<'a> Database {
 
     pub fn search(&self, pattern: &Regex, in_path: bool) -> Vec<Hit> {
         let match_file = |(i, entry): (usize, &Entry)| {
-            if pattern_matches(self, entry, pattern, in_path) {
+            if self.entry_matches(entry, pattern, in_path) {
                 Some(Hit::File(i))
             } else {
                 None
             }
         };
         let match_dir = |(i, entry): (usize, &Entry)| {
-            if pattern_matches(self, entry, pattern, in_path) {
+            if self.entry_matches(entry, pattern, in_path) {
                 Some(Hit::Directory(i))
             } else {
                 None
@@ -82,7 +82,7 @@ impl<'a> Database {
         let match_file = |(i, entry): (usize, &Entry)| {
             if aborted.load(Ordering::Relaxed) {
                 Some(Err(Error::SearchAbort))
-            } else if pattern_matches(self, entry, pattern, in_path) {
+            } else if self.entry_matches(entry, pattern, in_path) {
                 Some(Ok(Hit::File(i)))
             } else {
                 None
@@ -91,7 +91,7 @@ impl<'a> Database {
         let match_dir = |(i, entry): (usize, &Entry)| {
             if aborted.load(Ordering::Relaxed) {
                 Some(Err(Error::SearchAbort))
-            } else if pattern_matches(self, entry, pattern, in_path) {
+            } else if self.entry_matches(entry, pattern, in_path) {
                 Some(Ok(Hit::Directory(i)))
             } else {
                 None
@@ -131,6 +131,19 @@ impl<'a> Database {
             mtime: &status_vec.mtime[i],
             size: status_vec.size[i],
         }
+    }
+
+    fn entry_matches(&self, entry: &Entry, pattern: &Regex, in_path: bool) -> bool {
+        if in_path {
+            if let Some(path) = self.path_from_entry(entry).to_str() {
+                if pattern.is_match(path) {
+                    return true;
+                }
+            }
+        } else if pattern.is_match(&entry.name) {
+            return true;
+        }
+        false
     }
 
     fn push_file(&mut self, entry_info: EntryInfo, parent: usize) {
@@ -300,17 +313,4 @@ fn walk_file_system(database: Arc<Mutex<Database>>, path: &Path, parent: usize) 
                 walk_file_system(database.clone(), path, *index);
             });
     }
-}
-
-fn pattern_matches(database: &Database, entry: &Entry, pattern: &Regex, in_path: bool) -> bool {
-    if in_path {
-        if let Some(path) = database.path_from_entry(entry).to_str() {
-            if pattern.is_match(path) {
-                return true;
-            }
-        }
-    } else if pattern.is_match(&entry.name) {
-        return true;
-    }
-    false
 }

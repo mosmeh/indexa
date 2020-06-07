@@ -117,7 +117,7 @@ impl SearcherImpl {
                         }
                     });
 
-                    self.search = Some(Search {
+                    self.search.replace(Search {
                         thread,
                         aborted: aborted_clone,
                     });

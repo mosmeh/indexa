@@ -43,11 +43,11 @@ impl StatefulWidget for TextBox<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let grapheme_indices = UnicodeSegmentation::grapheme_indices(state.text.as_str(), true);
         let mut text = vec![self.prompt.clone()];
-        text.extend(grapheme_indices.map(|grapheme| {
-            if grapheme.0 == state.grapheme_cursor.cur_cursor() {
-                Text::styled(grapheme.1, self.highlight_style)
+        text.extend(grapheme_indices.map(|(i, grapheme)| {
+            if i == state.grapheme_cursor.cur_cursor() {
+                Text::styled(grapheme, self.highlight_style)
             } else {
-                Text::raw(grapheme.1)
+                Text::raw(grapheme)
             }
         }));
         if state.grapheme_cursor.cur_cursor() >= state.text.len() {
