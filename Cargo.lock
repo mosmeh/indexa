@@ -326,6 +326,8 @@ dependencies = [
  "structopt",
  "thiserror",
  "tui",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]

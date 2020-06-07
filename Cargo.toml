@@ -26,3 +26,5 @@ serde = { version = "1.0.111", features = ["derive"] }
 structopt = "0.3.14"
 thiserror = "1.0.19"
 tui = { version = "0.9.5", features = ["crossterm"], default-features = false }
+unicode-segmentation = "1.6.0"
+unicode-width = "0.1.7"

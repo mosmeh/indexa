@@ -1,3 +1,5 @@
+mod text_box;
+
 use crate::worker::{Loader, Searcher};
 use crate::Opt;
 use anyhow::Result;
@@ -11,6 +13,7 @@ use regex::{Regex, RegexBuilder};
 use std::io::{self, Write};
 use std::sync::Arc;
 use std::thread;
+use text_box::{TextBox, TextBoxState};
 use tui::backend::CrosstermBackend;
 use tui::layout::{Constraint, Layout};
 use tui::style::{Color, Modifier, Style};
@@ -33,7 +36,7 @@ enum State {
 struct TuiApp<'a> {
     opt: &'a Opt,
     database: Option<Arc<Database>>,
-    pattern: String,
+    text_box_state: TextBoxState,
     hits: Vec<Hit>,
     selected: usize,
     search_in_progress: bool,
@@ -45,7 +48,7 @@ impl<'a> TuiApp<'a> {
         let app = Self {
             opt,
             database: None,
-            pattern: "".to_string(),
+            text_box_state: Default::default(),
             hits: Vec::new(),
             selected: 0,
             search_in_progress: false,
@@ -130,7 +133,7 @@ impl<'a> TuiApp<'a> {
         Ok(())
     }
 
-    fn draw(&self, f: &mut Frame<Backend>) {
+    fn draw(&mut self, f: &mut Frame<Backend>) {
         let chunks = Layout::default()
             .constraints([
                 Constraint::Min(1),
@@ -171,52 +174,53 @@ impl<'a> TuiApp<'a> {
         f.render_widget(paragraph, chunks[1]);
 
         // input box
-        let text = [
-            Text::styled(
+        let text_box = TextBox::new()
+            .highlight_style(Style::default().fg(Color::Black).bg(Color::White))
+            .prompt(Text::styled(
                 "> ",
                 Style::default().fg(Color::Green).modifier(Modifier::BOLD),
-            ),
-            Text::raw(&self.pattern),
-            Text::styled(" ", Style::default().bg(Color::White)),
-        ];
-        let paragraph = Paragraph::new(text.iter());
-        f.render_widget(paragraph, chunks[2]);
+            ));
+        f.render_stateful_widget(text_box, chunks[2], &mut self.text_box_state);
     }
 
     fn handle_input(&mut self, key: KeyEvent) -> Result<State> {
-        match key {
-            KeyEvent {
-                code: KeyCode::Esc, ..
+        match (key.modifiers, key.code) {
+            (_, KeyCode::Esc)
+            | (KeyModifiers::CONTROL, KeyCode::Char('c'))
+            | (KeyModifiers::CONTROL, KeyCode::Char('g')) => return Ok(State::Aborted),
+            (_, KeyCode::Enter) => return Ok(State::Accepted),
+            (_, KeyCode::Backspace) | (KeyModifiers::CONTROL, KeyCode::Char('h')) => {
+                if self.text_box_state.on_backspace() {
+                    self.on_pattern_change()?;
+                }
             }
-            | KeyEvent {
-                code: KeyCode::Char('c'),
-                modifiers: KeyModifiers::CONTROL,
-            } => return Ok(State::Aborted),
-            KeyEvent {
-                code: KeyCode::Char(c),
-                ..
-            } => {
-                self.pattern.push(c);
+            (_, KeyCode::Delete) | (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+                if self.text_box_state.on_delete() {
+                    self.on_pattern_change()?;
+                }
+            }
+            (_, KeyCode::Left) | (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
+                self.text_box_state.on_left();
+            }
+            (_, KeyCode::Right) | (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
+                self.text_box_state.on_right();
+            }
+            (_, KeyCode::Home) | (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
+                self.text_box_state.on_home();
+            }
+            (_, KeyCode::End) | (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+                self.text_box_state.on_end();
+            }
+            (_, KeyCode::Up)
+            | (KeyModifiers::CONTROL, KeyCode::Char('p'))
+            | (KeyModifiers::CONTROL, KeyCode::Char('k')) => self.on_up()?,
+            (_, KeyCode::Down)
+            | (KeyModifiers::CONTROL, KeyCode::Char('n'))
+            | (KeyModifiers::CONTROL, KeyCode::Char('j')) => self.on_down()?,
+            (_, KeyCode::Char(c)) => {
+                self.text_box_state.on_char(c);
                 self.on_pattern_change()?;
             }
-            KeyEvent {
-                code: KeyCode::Backspace,
-                ..
-            } => {
-                self.pattern.pop();
-                self.on_pattern_change()?;
-            }
-            KeyEvent {
-                code: KeyCode::Up, ..
-            } => self.on_up()?,
-            KeyEvent {
-                code: KeyCode::Down,
-                ..
-            } => self.on_down()?,
-            KeyEvent {
-                code: KeyCode::Enter,
-                ..
-            } => return Ok(State::Accepted),
             _ => (),
         }
         Ok(State::Continue)
@@ -273,15 +277,16 @@ impl<'a> TuiApp<'a> {
             return Ok(());
         }
 
-        if self.pattern.is_empty() {
+        let pattern = self.text_box_state.text();
+        if pattern.is_empty() {
             self.hits.clear();
         } else {
             self.search_in_progress = true;
 
             let regex = if self.opt.regex {
-                RegexBuilder::new(&self.pattern)
+                RegexBuilder::new(pattern)
             } else {
-                RegexBuilder::new(&regex::escape(&self.pattern))
+                RegexBuilder::new(&regex::escape(pattern))
             }
             .case_insensitive(!self.opt.case_sensitive)
             .build();
