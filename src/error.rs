@@ -12,6 +12,6 @@ pub enum Error {
     Utf8,
     #[error("Invalid filename")]
     Filename,
-    #[error("Channel disconnected")]
-    ChannelSend,
+    #[error("Search aborted")]
+    SearchAbort,
 }

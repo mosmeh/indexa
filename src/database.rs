@@ -4,6 +4,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs::{DirEntry, FileType, Metadata};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
@@ -40,8 +41,73 @@ impl<'a> Database {
         Ok(Arc::try_unwrap(database).unwrap().into_inner().unwrap())
     }
 
+    pub fn num_entries(&self) -> usize {
+        self.files.len() + self.dirs.len()
+    }
+
     pub fn search(&self, pattern: &Regex, in_path: bool) -> Vec<Hit> {
-        search(&self, pattern, in_path)
+        let match_file = |(i, entry): (usize, &Entry)| {
+            if pattern_matches(self, entry, pattern, in_path) {
+                Some(Hit::File(i))
+            } else {
+                None
+            }
+        };
+        let match_dir = |(i, entry): (usize, &Entry)| {
+            if pattern_matches(self, entry, pattern, in_path) {
+                Some(Hit::Directory(i))
+            } else {
+                None
+            }
+        };
+
+        let files = (0..self.files.len())
+            .into_par_iter()
+            .zip(self.files.par_iter())
+            .filter_map(match_file);
+        let dirs = (0..self.dirs.len())
+            .into_par_iter()
+            .zip(self.dirs.par_iter())
+            .filter_map(match_dir);
+
+        files.chain(dirs).collect()
+    }
+
+    pub fn abortable_search(
+        &self,
+        pattern: &Regex,
+        in_path: bool,
+        aborted: Arc<AtomicBool>,
+    ) -> Result<Vec<Hit>> {
+        let match_file = |(i, entry): (usize, &Entry)| {
+            if aborted.load(Ordering::Relaxed) {
+                Some(Err(Error::SearchAbort))
+            } else if pattern_matches(self, entry, pattern, in_path) {
+                Some(Ok(Hit::File(i)))
+            } else {
+                None
+            }
+        };
+        let match_dir = |(i, entry): (usize, &Entry)| {
+            if aborted.load(Ordering::Relaxed) {
+                Some(Err(Error::SearchAbort))
+            } else if pattern_matches(self, entry, pattern, in_path) {
+                Some(Ok(Hit::Directory(i)))
+            } else {
+                None
+            }
+        };
+
+        let files = (0..self.files.len())
+            .into_par_iter()
+            .zip(self.files.par_iter())
+            .filter_map(match_file);
+        let dirs = (0..self.dirs.len())
+            .into_par_iter()
+            .zip(self.dirs.par_iter())
+            .filter_map(match_dir);
+
+        files.chain(dirs).collect()
     }
 
     pub fn path_from_hit(&self, hit: &Hit) -> PathBuf {
@@ -105,6 +171,7 @@ impl<'a> Database {
     }
 }
 
+#[derive(Debug)]
 pub enum Hit {
     File(usize),
     Directory(usize),
@@ -235,41 +302,15 @@ fn walk_file_system(database: Arc<Mutex<Database>>, path: &Path, parent: usize) 
     }
 }
 
-fn search(database: &Database, pattern: &Regex, in_path: bool) -> Vec<Hit> {
-    let match_file = |(i, entry)| {
-        if in_path {
-            if let Some(path) = database.path_from_entry(entry).to_str() {
-                if pattern.is_match(path) {
-                    return Some(Hit::File(i));
-                }
+fn pattern_matches(database: &Database, entry: &Entry, pattern: &Regex, in_path: bool) -> bool {
+    if in_path {
+        if let Some(path) = database.path_from_entry(entry).to_str() {
+            if pattern.is_match(path) {
+                return true;
             }
-        } else if pattern.is_match(&entry.name) {
-            return Some(Hit::File(i));
         }
-        None
-    };
-
-    let match_dir = |(i, entry)| {
-        if in_path {
-            if let Some(path) = database.path_from_entry(entry).to_str() {
-                if pattern.is_match(path) {
-                    return Some(Hit::Directory(i));
-                }
-            }
-        } else if pattern.is_match(&entry.name) {
-            return Some(Hit::Directory(i));
-        }
-        None
-    };
-
-    let files = (0..database.files.len())
-        .into_par_iter()
-        .zip(database.files.par_iter())
-        .filter_map(match_file);
-    let dirs = (0..database.dirs.len())
-        .into_par_iter()
-        .zip(database.dirs.par_iter())
-        .filter_map(match_dir);
-
-    files.chain(dirs).collect()
+    } else if pattern.is_match(&entry.name) {
+        return true;
+    }
+    false
 }
