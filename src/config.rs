@@ -158,7 +158,7 @@ pub struct UIConfigUnix {
 impl Default for UIConfigUnix {
     fn default() -> Self {
         Self {
-            mode_format: ModeFormatUnix::Symbol,
+            mode_format: ModeFormatUnix::Symbolic,
         }
     }
 }
@@ -167,7 +167,7 @@ impl Default for UIConfigUnix {
 #[serde(rename_all = "lowercase")]
 pub enum ModeFormatUnix {
     Octal,
-    Symbol,
+    Symbolic,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -268,9 +268,9 @@ impl<'a> TuiApp<'a> {
 
     #[cfg(unix)]
     fn display_mode(&self, mode: Option<Mode>) -> Option<String> {
-        mode.map(|_m| match self.config.ui.unix.mode_format {
-            ModeFormatUnix::Octal => unimplemented!(),
-            ModeFormatUnix::Symbol => unimplemented!(),
+        mode.map(|m| match self.config.ui.unix.mode_format {
+            ModeFormatUnix::Octal => format!("{}", m.display_octal()),
+            ModeFormatUnix::Symbolic => format!("{}", m.display_symbolic()),
         })
     }
 
