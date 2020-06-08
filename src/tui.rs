@@ -10,6 +10,7 @@ use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use indexa::mode::Mode;
 use indexa::{Database, Entry, EntryId};
 use regex::{Regex, RegexBuilder};
 use std::io::{self, Write};
@@ -22,6 +23,12 @@ use tui::style::{Color, Modifier, Style};
 use tui::widgets::{Paragraph, Row, Table, TableState, Text};
 use tui::Frame;
 use tui::Terminal;
+
+#[cfg(unix)]
+use crate::config::ModeFormatUnix;
+
+#[cfg(windows)]
+use crate::config::ModeFormatWindows;
 
 pub fn run(config: &Config) -> Result<()> {
     TuiApp::new(config)?.run()
@@ -259,8 +266,20 @@ impl<'a> TuiApp<'a> {
         })
     }
 
-    fn display_mode(&self, mode: Option<u32>) -> Option<String> {
-        mode.map(|m| format!("{}", m)) // TODO
+    #[cfg(unix)]
+    fn display_mode(&self, mode: Option<Mode>) -> Option<String> {
+        mode.map(|_m| match self.config.ui.unix.mode_format {
+            ModeFormatUnix::Octal => unimplemented!(),
+            ModeFormatUnix::Symbol => unimplemented!(),
+        })
+    }
+
+    #[cfg(windows)]
+    fn display_mode(&self, mode: Option<Mode>) -> Option<String> {
+        mode.map(|m| match self.config.ui.windows.mode_format {
+            ModeFormatWindows::Traditional => format!("{}", m.display_traditional()),
+            ModeFormatWindows::PowerShell => format!("{}", m.display_powershell()),
+        })
     }
 
     fn display_datetime(&self, time: Option<&std::time::SystemTime>) -> Option<String> {

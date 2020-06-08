@@ -1,3 +1,4 @@
+use crate::mode::Mode;
 use crate::{Error, Result};
 use rayon::prelude::*;
 use regex::Regex;
@@ -7,12 +8,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt;
-
-#[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
@@ -260,7 +255,7 @@ impl Entry<'_, '_> {
         status_vec.size.as_ref().map(|v| v[i])
     }
 
-    pub fn mode(&self) -> Option<u32> {
+    pub fn mode(&self) -> Option<Mode> {
         let (status_vec, i) = self.status_vec_index();
         status_vec.mode.as_ref().map(|v| v[i])
     }
@@ -304,7 +299,7 @@ struct EntryNode {
 #[derive(Debug, Serialize, Deserialize)]
 struct EntryStatusVec {
     size: Option<Vec<u64>>,
-    mode: Option<Vec<u32>>,
+    mode: Option<Vec<Mode>>,
     created: Option<Vec<SystemTime>>,
     modified: Option<Vec<SystemTime>>,
     accessed: Option<Vec<SystemTime>>,
@@ -373,7 +368,7 @@ struct IndexFlags {
 #[derive(Serialize, Deserialize)]
 struct EntryStatus {
     size: Option<u64>,
-    mode: Option<u32>,
+    mode: Option<Mode>,
     created: Option<SystemTime>,
     modified: Option<SystemTime>,
     accessed: Option<SystemTime>,
@@ -387,7 +382,7 @@ impl EntryStatus {
             None
         };
         let mode = if index_flags.mode {
-            Some(mode_from_metadata(metadata))
+            Some(metadata.into())
         } else {
             None
         };
@@ -417,16 +412,6 @@ impl EntryStatus {
         };
         Ok(status)
     }
-}
-
-#[cfg(windows)]
-fn mode_from_metadata(metadata: &Metadata) -> u32 {
-    metadata.file_attributes()
-}
-
-#[cfg(unix)]
-fn mode_from_metadata(metadata: &Metadata) -> u32 {
-    metadata.mode()
 }
 
 fn sanitize_system_time(time: &SystemTime) -> Result<SystemTime> {

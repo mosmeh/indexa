@@ -79,6 +79,9 @@ pub struct UIConfig {
     pub human_readable_size: bool,
     pub datetime_format: String,
     pub columns: Vec<Column>,
+
+    pub unix: UIConfigUnix,
+    pub windows: UIConfigWindows,
 }
 
 impl Default for UIConfig {
@@ -98,6 +101,8 @@ impl Default for UIConfig {
                     width: None,
                 },
             ],
+            unix: Default::default(),
+            windows: Default::default(),
         }
     }
 }
@@ -125,14 +130,14 @@ pub enum ColumnKind {
 impl fmt::Display for ColumnKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ColumnKind::FullPath => write!(f, "Path"),
-            ColumnKind::Basename => write!(f, "Basename"),
-            ColumnKind::Size => write!(f, "Size"),
-            ColumnKind::Mode => write!(f, "Mode"),
-            ColumnKind::Extension => write!(f, "Extension"),
-            ColumnKind::Created => write!(f, "Created"),
-            ColumnKind::Modified => write!(f, "Modified"),
-            ColumnKind::Accessed => write!(f, "Accessed"),
+            ColumnKind::FullPath => f.write_str("Path"),
+            ColumnKind::Basename => f.write_str("Basename"),
+            ColumnKind::Size => f.write_str("Size"),
+            ColumnKind::Mode => f.write_str("Mode"),
+            ColumnKind::Extension => f.write_str("Extension"),
+            ColumnKind::Created => f.write_str("Created"),
+            ColumnKind::Modified => f.write_str("Modified"),
+            ColumnKind::Accessed => f.write_str("Accessed"),
         }
     }
 }
@@ -142,4 +147,46 @@ impl fmt::Display for ColumnKind {
 pub enum SortOrder {
     Ascending,
     Descending,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UIConfigUnix {
+    pub mode_format: ModeFormatUnix,
+}
+
+impl Default for UIConfigUnix {
+    fn default() -> Self {
+        Self {
+            mode_format: ModeFormatUnix::Symbol,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModeFormatUnix {
+    Octal,
+    Symbol,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UIConfigWindows {
+    pub mode_format: ModeFormatWindows,
+}
+
+impl Default for UIConfigWindows {
+    fn default() -> Self {
+        Self {
+            mode_format: ModeFormatWindows::Traditional,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModeFormatWindows {
+    Traditional,
+    PowerShell,
 }
