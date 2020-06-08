@@ -1,4 +1,4 @@
-use crate::config::{ColumnType, Config, SortOrder};
+use crate::config::{ColumnKind, Config, SortOrder};
 use anyhow::Result;
 use crossbeam::channel::{self, Receiver, Sender};
 use indexa::{Database, Entry, EntryId};
@@ -71,7 +71,7 @@ impl Searcher {
 
 struct SearcherImpl {
     in_path: bool,
-    sort_by: ColumnType,
+    sort_by: ColumnKind,
     sort_order: SortOrder,
     database: Arc<Database>,
     pattern_rx: Receiver<Regex>,
@@ -164,18 +164,18 @@ impl Search {
 }
 
 fn build_compare_func(
-    sort_by: &ColumnType,
+    sort_by: &ColumnKind,
     sort_order: &SortOrder,
 ) -> Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> {
     let compare: Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> = match sort_by {
-        ColumnType::Basename => Box::new(move |_, _| cmp::Ordering::Equal),
-        ColumnType::FullPath => Box::new(move |a, b| a.path().cmp(&b.path())),
-        ColumnType::Extension => Box::new(move |a, b| a.extension().cmp(&b.extension())),
-        ColumnType::Size => Box::new(move |a, b| a.size().cmp(&b.size())),
-        ColumnType::Mode => Box::new(move |a, b| a.mode().cmp(&b.mode())),
-        ColumnType::Created => Box::new(move |a, b| a.created().cmp(&b.created())),
-        ColumnType::Modified => Box::new(move |a, b| a.modified().cmp(&b.modified())),
-        ColumnType::Accessed => Box::new(move |a, b| a.accessed().cmp(&b.accessed())),
+        ColumnKind::Basename => Box::new(move |_, _| cmp::Ordering::Equal),
+        ColumnKind::FullPath => Box::new(move |a, b| a.path().cmp(&b.path())),
+        ColumnKind::Extension => Box::new(move |a, b| a.extension().cmp(&b.extension())),
+        ColumnKind::Size => Box::new(move |a, b| a.size().cmp(&b.size())),
+        ColumnKind::Mode => Box::new(move |a, b| a.mode().cmp(&b.mode())),
+        ColumnKind::Created => Box::new(move |a, b| a.created().cmp(&b.created())),
+        ColumnKind::Modified => Box::new(move |a, b| a.modified().cmp(&b.modified())),
+        ColumnKind::Accessed => Box::new(move |a, b| a.accessed().cmp(&b.accessed())),
     };
 
     // tiebreak by basename and (optionally) reverse

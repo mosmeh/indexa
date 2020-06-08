@@ -3,7 +3,7 @@ mod tui;
 mod worker;
 
 use anyhow::Result;
-use config::{Config, IndexType};
+use config::{Config, IndexKind};
 use indexa::DatabaseBuilder;
 use rayon::ThreadPoolBuilder;
 use std::fs::{self, File};
@@ -52,13 +52,13 @@ fn main() -> Result<()> {
         }
 
         let mut db_builder = DatabaseBuilder::new(&config.database.dir);
-        for index_type in &config.database.index {
-            match index_type {
-                IndexType::Size => db_builder.size(true),
-                IndexType::Created => db_builder.created(true),
-                IndexType::Modified => db_builder.modified(true),
-                IndexType::Accessed => db_builder.accessed(true),
-                IndexType::Mode => db_builder.mode(true),
+        for kind in &config.database.index {
+            match kind {
+                IndexKind::Size => db_builder.size(true),
+                IndexKind::Created => db_builder.created(true),
+                IndexKind::Modified => db_builder.modified(true),
+                IndexKind::Accessed => db_builder.accessed(true),
+                IndexKind::Mode => db_builder.mode(true),
             };
         }
         let database = db_builder.build()?;

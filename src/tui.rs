@@ -1,6 +1,6 @@
 mod text_box;
 
-use crate::config::{ColumnType, Config};
+use crate::config::{ColumnKind, Config};
 use crate::worker::{Loader, Searcher};
 use anyhow::Result;
 use chrono::offset::Local;
@@ -10,7 +10,7 @@ use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use indexa::{Database, EntryId};
+use indexa::{Database, Entry, EntryId};
 use regex::{Regex, RegexBuilder};
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -80,7 +80,8 @@ impl<'a> TuiApp<'a> {
         terminal.clear()?;
 
         let database = loop {
-            terminal.draw(|mut f| self.draw(&mut f))?;
+            let terminal_width = terminal.size()?.width;
+            terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
             channel::select! {
                 recv(load_rx) -> database => break Some(database?),
                 recv(input_rx) -> key => {
@@ -104,7 +105,8 @@ impl<'a> TuiApp<'a> {
             self.on_pattern_change()?;
 
             loop {
-                terminal.draw(|mut f| self.draw(&mut f))?;
+                let terminal_width = terminal.size()?.width;
+                terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
                 channel::select! {
                     recv(result_rx) -> hits => {
                         self.handle_search_result(hits?)?;
@@ -134,7 +136,7 @@ impl<'a> TuiApp<'a> {
         Ok(())
     }
 
-    fn draw(&mut self, f: &mut Frame<Backend>) {
+    fn draw(&mut self, f: &mut Frame<Backend>, terminal_width: u16) {
         let chunks = Layout::default()
             .constraints([
                 Constraint::Min(1),
@@ -144,79 +146,7 @@ impl<'a> TuiApp<'a> {
             .split(f.size());
 
         // hits table
-        let header = self
-            .config
-            .ui
-            .columns
-            .iter()
-            .map(|column| format!("{}", column));
-
-        let items = self.hits.iter().map(|id| {
-            let entry = self.database.as_ref().unwrap().entry(id);
-            let columns = self
-                .config
-                .ui
-                .columns
-                .iter()
-                .map(|column| match column {
-                    ColumnType::Basename => entry.basename().to_string(),
-                    ColumnType::FullPath => entry.path().to_str().unwrap().to_string(),
-                    ColumnType::Extension => entry.extension().unwrap_or("").to_string(),
-                    ColumnType::Size => entry
-                        .size()
-                        .map(|size| {
-                            if self.config.ui.human_readable_size {
-                                size::Size::Bytes(size)
-                                    .to_string(size::Base::Base2, size::Style::Abbreviated)
-                            } else {
-                                format!("{}", size)
-                            }
-                        })
-                        .unwrap_or_else(|| "".to_string()),
-                    ColumnType::Created => {
-                        let created: DateTime<Local> = (*entry.created().unwrap()).into();
-                        format!("{}", created.format(&self.config.ui.datetime_format))
-                    }
-                    ColumnType::Modified => {
-                        let modified: DateTime<Local> = (*entry.modified().unwrap()).into();
-                        format!("{}", modified.format(&self.config.ui.datetime_format))
-                    }
-                    ColumnType::Accessed => {
-                        let accessed: DateTime<Local> = (*entry.accessed().unwrap()).into();
-                        format!("{}", accessed.format(&self.config.ui.datetime_format))
-                    }
-                    ColumnType::Mode => format!("{}", entry.mode().unwrap()), // TODO
-                })
-                .collect::<Vec<_>>();
-            Row::Data(columns.into_iter())
-        });
-
-        let widths = self
-            .config
-            .ui
-            .columns
-            .iter()
-            .map(|column| match column {
-                ColumnType::Basename => {
-                    Constraint::Percentage(self.config.ui.basename_width_percentage)
-                }
-                ColumnType::FullPath => Constraint::Min(1),
-                ColumnType::Size => Constraint::Length(9),
-                ColumnType::Created | ColumnType::Modified | ColumnType::Accessed => {
-                    Constraint::Length(20)
-                }
-                _ => Constraint::Length(10),
-            })
-            .collect::<Vec<_>>();
-
-        let table = Table::new(header, items)
-            .widths(&widths)
-            .highlight_style(Style::default().fg(Color::Green).modifier(Modifier::BOLD))
-            .highlight_symbol("> ");
-
-        let mut table_state = TableState::default();
-        table_state.select(Some(self.selected));
-        f.render_stateful_widget(table, chunks[0], &mut table_state);
+        self.draw_table(f, chunks[0], terminal_width);
 
         // status bar
         let text = [if self.database.is_none() {
@@ -241,6 +171,103 @@ impl<'a> TuiApp<'a> {
                 Style::default().fg(Color::Green).modifier(Modifier::BOLD),
             ));
         f.render_stateful_widget(text_box, chunks[2], &mut self.text_box_state);
+    }
+
+    fn draw_table(&self, f: &mut Frame<Backend>, area: tui::layout::Rect, terminal_width: u16) {
+        let header = self
+            .config
+            .ui
+            .columns
+            .iter()
+            .map(|column| format!("{}", column.kind));
+
+        let items = self.hits.iter().map(|id| {
+            let entry = self.database.as_ref().unwrap().entry(id);
+            let columns = self
+                .config
+                .ui
+                .columns
+                .iter()
+                .map(|column| {
+                    self.display_column_content(&column.kind, &entry)
+                        .unwrap_or_else(|| "".to_string())
+                })
+                .collect::<Vec<_>>();
+            Row::Data(columns.into_iter())
+        });
+
+        let (num_fixed, sum_widths) =
+            self.config
+                .ui
+                .columns
+                .iter()
+                .fold((0, 0), |(num_fixed, sum_widths), column| {
+                    if let Some(width) = column.width {
+                        (num_fixed + 1, sum_widths + width)
+                    } else {
+                        (num_fixed, sum_widths)
+                    }
+                });
+        let remaining_width = terminal_width - sum_widths;
+        let num_flexible = self.config.ui.columns.len() as u16 - num_fixed;
+        let flexible_width = remaining_width / num_flexible;
+        let widths = self
+            .config
+            .ui
+            .columns
+            .iter()
+            .map(|column| {
+                if let Some(width) = column.width {
+                    Constraint::Length(width)
+                } else {
+                    Constraint::Min(flexible_width)
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let table = Table::new(header, items)
+            .widths(&widths)
+            .highlight_style(Style::default().fg(Color::Green).modifier(Modifier::BOLD))
+            .highlight_symbol("> ");
+
+        let mut table_state = TableState::default();
+        table_state.select(Some(self.selected));
+
+        f.render_stateful_widget(table, area, &mut table_state);
+    }
+
+    fn display_column_content(&self, kind: &ColumnKind, entry: &Entry) -> Option<String> {
+        match kind {
+            ColumnKind::Basename => Some(entry.basename().to_string()),
+            ColumnKind::FullPath => entry.path().to_str().map(|s| s.to_string()),
+            ColumnKind::Extension => entry.extension().map(|s| s.to_string()),
+            ColumnKind::Size => self.display_size(entry.size()),
+            ColumnKind::Mode => self.display_mode(entry.mode()),
+            ColumnKind::Created => self.display_datetime(entry.created()),
+            ColumnKind::Modified => self.display_datetime(entry.modified()),
+            ColumnKind::Accessed => self.display_datetime(entry.accessed()),
+        }
+    }
+
+    fn display_size(&self, size: Option<u64>) -> Option<String> {
+        size.map(|s| {
+            if self.config.ui.human_readable_size {
+                size::Size::Bytes(s).to_string(size::Base::Base2, size::Style::Abbreviated)
+            } else {
+                format!("{}", s)
+            }
+        })
+    }
+
+    fn display_mode(&self, mode: Option<u32>) -> Option<String> {
+        mode.map(|m| format!("{}", m)) // TODO
+    }
+
+    fn display_datetime(&self, time: Option<&std::time::SystemTime>) -> Option<String> {
+        time.map(|t| {
+            let datetime = DateTime::<Local>::from(*t);
+            format!("{}", datetime.format(&self.config.ui.datetime_format))
+        })
     }
 
     fn handle_input(&mut self, key: KeyEvent) -> Result<State> {

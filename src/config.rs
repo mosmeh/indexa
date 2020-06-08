@@ -47,7 +47,7 @@ impl FlagConfig {
 #[serde(default)]
 pub struct DatabaseConfig {
     pub location: PathBuf,
-    pub index: Vec<IndexType>,
+    pub index: Vec<IndexKind>,
     pub dir: PathBuf,
 }
 
@@ -63,7 +63,7 @@ impl Default for DatabaseConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum IndexType {
+pub enum IndexKind {
     Size,
     Mode,
     Created,
@@ -74,30 +74,43 @@ pub enum IndexType {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UIConfig {
-    pub sort_by: ColumnType,
+    pub sort_by: ColumnKind,
     pub sort_order: SortOrder,
-    pub columns: Vec<ColumnType>,
-    pub basename_width_percentage: u16,
     pub human_readable_size: bool,
     pub datetime_format: String,
+    pub columns: Vec<Column>,
 }
 
 impl Default for UIConfig {
     fn default() -> Self {
         Self {
-            sort_by: ColumnType::Basename,
+            sort_by: ColumnKind::Basename,
             sort_order: SortOrder::Ascending,
-            columns: vec![ColumnType::Basename, ColumnType::FullPath],
-            basename_width_percentage: 30,
             human_readable_size: false,
             datetime_format: "%Y/%m/%d %T".to_string(),
+            columns: vec![
+                Column {
+                    kind: ColumnKind::Basename,
+                    width: None,
+                },
+                Column {
+                    kind: ColumnKind::FullPath,
+                    width: None,
+                },
+            ],
         }
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Column {
+    pub kind: ColumnKind,
+    pub width: Option<u16>,
+}
+
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum ColumnType {
+pub enum ColumnKind {
     Basename,
     #[serde(rename = "path")]
     FullPath,
@@ -109,17 +122,17 @@ pub enum ColumnType {
     Accessed,
 }
 
-impl fmt::Display for ColumnType {
+impl fmt::Display for ColumnKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ColumnType::FullPath => write!(f, "Path"),
-            ColumnType::Basename => write!(f, "Basename"),
-            ColumnType::Size => write!(f, "Size"),
-            ColumnType::Mode => write!(f, "Mode"),
-            ColumnType::Extension => write!(f, "Extension"),
-            ColumnType::Created => write!(f, "Created"),
-            ColumnType::Modified => write!(f, "Modified"),
-            ColumnType::Accessed => write!(f, "Accessed"),
+            ColumnKind::FullPath => write!(f, "Path"),
+            ColumnKind::Basename => write!(f, "Basename"),
+            ColumnKind::Size => write!(f, "Size"),
+            ColumnKind::Mode => write!(f, "Mode"),
+            ColumnKind::Extension => write!(f, "Extension"),
+            ColumnKind::Created => write!(f, "Created"),
+            ColumnKind::Modified => write!(f, "Modified"),
+            ColumnKind::Accessed => write!(f, "Accessed"),
         }
     }
 }
