@@ -1,7 +1,7 @@
 mod text_box;
 
+use crate::config::{ColumnType, Config};
 use crate::worker::{Loader, Searcher};
-use crate::Opt;
 use anyhow::Result;
 use chrono::offset::Local;
 use chrono::DateTime;
@@ -10,7 +10,7 @@ use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use indexa::{Database, Hit};
+use indexa::{Database, EntryId};
 use regex::{Regex, RegexBuilder};
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -23,8 +23,8 @@ use tui::widgets::{Paragraph, Row, Table, TableState, Text};
 use tui::Frame;
 use tui::Terminal;
 
-pub fn run(opt: &Opt) -> Result<()> {
-    TuiApp::new(opt)?.run()
+pub fn run(config: &Config) -> Result<()> {
+    TuiApp::new(config)?.run()
 }
 
 type Backend = CrosstermBackend<io::Stdout>;
@@ -36,19 +36,19 @@ enum State {
 }
 
 struct TuiApp<'a> {
-    opt: &'a Opt,
+    config: &'a Config,
     database: Option<Arc<Database>>,
     text_box_state: TextBoxState,
-    hits: Vec<Hit>,
+    hits: Vec<EntryId>,
     selected: usize,
     search_in_progress: bool,
     pattern_tx: Option<Sender<Regex>>,
 }
 
 impl<'a> TuiApp<'a> {
-    fn new(opt: &'a Opt) -> Result<Self> {
+    fn new(config: &'a Config) -> Result<Self> {
         let app = Self {
-            opt,
+            config,
             database: None,
             text_box_state: Default::default(),
             hits: Vec::new(),
@@ -61,7 +61,7 @@ impl<'a> TuiApp<'a> {
 
     fn run(&mut self) -> Result<()> {
         let (load_tx, load_rx) = channel::unbounded();
-        let db_path = self.opt.database.clone();
+        let db_path = self.config.database.location.clone();
         let loader = Loader::run(db_path, load_tx)?;
 
         let (input_tx, input_rx) = channel::unbounded();
@@ -96,10 +96,9 @@ impl<'a> TuiApp<'a> {
             let database = Arc::new(database);
             self.database = Some(Arc::clone(&database));
 
-            let in_path = self.opt.in_path;
             let (pattern_tx, pattern_rx) = channel::unbounded();
             let (result_tx, result_rx) = channel::unbounded();
-            let searcher = Searcher::run(database, in_path, pattern_rx, result_tx)?;
+            let searcher = Searcher::run(self.config, database, pattern_rx, result_tx)?;
 
             self.pattern_tx = Some(pattern_tx);
             self.on_pattern_change()?;
@@ -145,33 +144,73 @@ impl<'a> TuiApp<'a> {
             .split(f.size());
 
         // hits table
-        let items = self.hits.iter().rev().map(|hit| {
-            let path = self.database.as_ref().unwrap().path_from_hit(&hit);
-            let status = self.database.as_ref().unwrap().status_from_hit(&hit);
-            let size_str = if self.opt.human_readable {
-                size::Size::Bytes(status.size)
-                    .to_string(size::Base::Base2, size::Style::Abbreviated)
-            } else {
-                format!("{}", status.size)
-            };
-            let mtime: DateTime<Local> = (*status.mtime).into();
-            Row::Data(
-                vec![
-                    path.file_name().unwrap().to_str().unwrap().to_string(),
-                    size_str,
-                    format!("{}", mtime.format("%Y/%m/%d %T")),
-                    path.to_str().unwrap().to_string(),
-                ]
-                .into_iter(),
-            )
+        let header = self
+            .config
+            .ui
+            .columns
+            .iter()
+            .map(|column| format!("{}", column));
+
+        let items = self.hits.iter().map(|id| {
+            let entry = self.database.as_ref().unwrap().entry(id);
+            let columns = self
+                .config
+                .ui
+                .columns
+                .iter()
+                .map(|column| match column {
+                    ColumnType::Basename => entry.basename().to_string(),
+                    ColumnType::FullPath => entry.path().to_str().unwrap().to_string(),
+                    ColumnType::Extension => entry.extension().unwrap_or("").to_string(),
+                    ColumnType::Size => entry
+                        .size()
+                        .map(|size| {
+                            if self.config.ui.human_readable_size {
+                                size::Size::Bytes(size)
+                                    .to_string(size::Base::Base2, size::Style::Abbreviated)
+                            } else {
+                                format!("{}", size)
+                            }
+                        })
+                        .unwrap_or_else(|| "".to_string()),
+                    ColumnType::Created => {
+                        let created: DateTime<Local> = (*entry.created().unwrap()).into();
+                        format!("{}", created.format(&self.config.ui.datetime_format))
+                    }
+                    ColumnType::Modified => {
+                        let modified: DateTime<Local> = (*entry.modified().unwrap()).into();
+                        format!("{}", modified.format(&self.config.ui.datetime_format))
+                    }
+                    ColumnType::Accessed => {
+                        let accessed: DateTime<Local> = (*entry.accessed().unwrap()).into();
+                        format!("{}", accessed.format(&self.config.ui.datetime_format))
+                    }
+                    ColumnType::Mode => format!("{}", entry.mode().unwrap()), // TODO
+                })
+                .collect::<Vec<_>>();
+            Row::Data(columns.into_iter())
         });
-        let table = Table::new(["Name", "Size", "Modified", "Path"].iter(), items)
-            .widths(&[
-                Constraint::Ratio(1, 3),
-                Constraint::Length(10),
-                Constraint::Length(20),
-                Constraint::Min(1),
-            ])
+
+        let widths = self
+            .config
+            .ui
+            .columns
+            .iter()
+            .map(|column| match column {
+                ColumnType::Basename => {
+                    Constraint::Percentage(self.config.ui.basename_width_percentage)
+                }
+                ColumnType::FullPath => Constraint::Min(1),
+                ColumnType::Size => Constraint::Length(9),
+                ColumnType::Created | ColumnType::Modified | ColumnType::Accessed => {
+                    Constraint::Length(20)
+                }
+                _ => Constraint::Length(10),
+            })
+            .collect::<Vec<_>>();
+
+        let table = Table::new(header, items)
+            .widths(&widths)
             .highlight_style(Style::default().fg(Color::Green).modifier(Modifier::BOLD))
             .highlight_symbol("> ");
 
@@ -232,6 +271,10 @@ impl<'a> TuiApp<'a> {
             (_, KeyCode::End) | (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
                 self.text_box_state.on_end();
             }
+            (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+                self.text_box_state.clear();
+                self.on_pattern_change()?;
+            }
             (_, KeyCode::Up)
             | (KeyModifiers::CONTROL, KeyCode::Char('p'))
             | (KeyModifiers::CONTROL, KeyCode::Char('k')) => self.on_up()?,
@@ -247,7 +290,7 @@ impl<'a> TuiApp<'a> {
         Ok(State::Continue)
     }
 
-    fn handle_search_result(&mut self, hits: Vec<Hit>) -> Result<()> {
+    fn handle_search_result(&mut self, hits: Vec<EntryId>) -> Result<()> {
         self.hits = hits;
         self.selected = self.selected.min(self.hits.len().saturating_sub(1));
         self.search_in_progress = false;
@@ -271,13 +314,14 @@ impl<'a> TuiApp<'a> {
     }
 
     fn on_accept(&self) -> Result<()> {
-        if let Some(hit) = self.hits.get(self.selected) {
+        if let Some(id) = self.hits.get(self.selected) {
             println!(
                 "{}",
                 self.database
                     .as_ref()
                     .unwrap()
-                    .path_from_hit(hit)
+                    .entry(id)
+                    .path()
                     .to_str()
                     .unwrap()
             );
@@ -296,12 +340,12 @@ impl<'a> TuiApp<'a> {
         } else {
             self.search_in_progress = true;
 
-            let regex = if self.opt.regex {
+            let regex = if self.config.flags.regex {
                 RegexBuilder::new(pattern)
             } else {
                 RegexBuilder::new(&regex::escape(pattern))
             }
-            .case_insensitive(!self.opt.case_sensitive)
+            .case_insensitive(!self.config.flags.case_sensitive)
             .build();
 
             if let Ok(pattern) = regex {

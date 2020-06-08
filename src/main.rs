@@ -1,12 +1,13 @@
+mod config;
 mod tui;
 mod worker;
 
-use anyhow::{anyhow, Result};
-use indexa::Database;
+use anyhow::Result;
+use config::{Config, IndexType};
+use indexa::DatabaseBuilder;
 use rayon::ThreadPoolBuilder;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -28,16 +29,7 @@ pub struct Opt {
     regex: bool,
 
     #[structopt(short, long)]
-    human_readable: bool,
-
-    #[structopt(short, long)]
     update: bool,
-
-    #[structopt(short, long, default_value = "database")]
-    database: PathBuf,
-
-    #[structopt(short, long)]
-    location: Option<PathBuf>,
 
     #[structopt(short, long)]
     threads: Option<usize>,
@@ -45,32 +37,39 @@ pub struct Opt {
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
-    let location = opt
-        .location
-        .clone()
-        .or_else(dirs::home_dir)
-        .ok_or_else(|| anyhow!("Cannot determine root directory to index"))?;
-    let threads = opt.threads.unwrap_or_else(|| num_cpus::get() - 1);
+    let mut config: Config = toml::from_str(&fs::read_to_string("config.toml")?)?;
+    config.flags.merge_opt(&opt);
 
     ThreadPoolBuilder::new()
-        .num_threads(threads)
+        .num_threads(config.flags.threads)
         .build_global()?;
 
-    if opt.update || !opt.database.exists() {
-        if opt.database.exists() {
+    if opt.update || !config.database.location.exists() {
+        if config.database.location.exists() {
             println!("Updating database");
         } else {
             println!("Creating database");
         }
 
-        let database = Database::new(&location)?;
-        let mut writer = BufWriter::new(File::create(&opt.database)?);
+        let mut db_builder = DatabaseBuilder::new(&config.database.dir);
+        for index_type in &config.database.index {
+            match index_type {
+                IndexType::Size => db_builder.size(true),
+                IndexType::Created => db_builder.created(true),
+                IndexType::Modified => db_builder.modified(true),
+                IndexType::Accessed => db_builder.accessed(true),
+                IndexType::Mode => db_builder.mode(true),
+            };
+        }
+        let database = db_builder.build()?;
+
+        let mut writer = BufWriter::new(File::create(&config.database.location)?);
         bincode::serialize_into(&mut writer, &database)?;
         writer.flush()?;
     }
 
     if !opt.update {
-        tui::run(&opt)?;
+        tui::run(&config)?;
     }
 
     Ok(())

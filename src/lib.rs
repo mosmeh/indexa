@@ -4,4 +4,4 @@ mod error;
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub use database::{Database, Hit};
+pub use database::{Database, DatabaseBuilder, Entry, EntryId};

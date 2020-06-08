@@ -70,6 +70,12 @@ impl TextBoxState {
         &self.text
     }
 
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.grapheme_cursor = GraphemeCursor::new(0, 0, true);
+        self.char_cursor = 0;
+    }
+
     pub fn on_char(&mut self, ch: char) {
         self.text.insert(self.grapheme_cursor.cur_cursor(), ch);
         self.grapheme_cursor =
