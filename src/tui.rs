@@ -8,6 +8,7 @@ use chrono::DateTime;
 use crossbeam::channel::{self, Sender};
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    MouseEvent,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use indexa::mode::Mode;
@@ -71,13 +72,6 @@ impl<'a> TuiApp<'a> {
         let db_path = self.config.database.location.clone();
         let loader = Loader::run(db_path, load_tx)?;
 
-        let (input_tx, input_rx) = channel::unbounded();
-        thread::spawn(move || loop {
-            if let Ok(Event::Key(key)) = event::read() {
-                input_tx.send(key).unwrap();
-            }
-        });
-
         terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
         crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -86,13 +80,20 @@ impl<'a> TuiApp<'a> {
         terminal.hide_cursor()?;
         terminal.clear()?;
 
+        let (input_tx, input_rx) = channel::unbounded();
+        thread::spawn(move || loop {
+            if let Ok(event) = event::read() {
+                input_tx.send(event).unwrap();
+            }
+        });
+
         let database = loop {
             let terminal_width = terminal.size()?.width;
             terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
             channel::select! {
                 recv(load_rx) -> database => break Some(database?),
-                recv(input_rx) -> key => {
-                    match self.handle_input(key?)? {
+                recv(input_rx) -> event => {
+                    match self.handle_input(event?)? {
                         State::Aborted | State::Accepted => break None,
                         _ => (),
                     }
@@ -118,8 +119,8 @@ impl<'a> TuiApp<'a> {
                     recv(result_rx) -> hits => {
                         self.handle_search_result(hits?)?;
                     }
-                    recv(input_rx) -> key => {
-                        match self.handle_input(key?)? {
+                    recv(input_rx) -> event => {
+                        match self.handle_input(event?)? {
                             State::Aborted => {
                                 cleanup_terminal(terminal)?;
                                 break;
@@ -289,7 +290,15 @@ impl<'a> TuiApp<'a> {
         })
     }
 
-    fn handle_input(&mut self, key: KeyEvent) -> Result<State> {
+    fn handle_input(&mut self, event: Event) -> Result<State> {
+        match event {
+            Event::Key(key) => self.handle_key(key),
+            Event::Mouse(mouse) => self.handle_mouse(mouse),
+            Event::Resize(_, _) => Ok(State::Continue),
+        }
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> Result<State> {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc)
             | (KeyModifiers::CONTROL, KeyCode::Char('c'))
@@ -333,6 +342,15 @@ impl<'a> TuiApp<'a> {
             }
             _ => (),
         }
+        Ok(State::Continue)
+    }
+
+    fn handle_mouse(&mut self, mouse: MouseEvent) -> Result<State> {
+        match mouse {
+            MouseEvent::ScrollUp(_, _, _) => self.on_up()?,
+            MouseEvent::ScrollDown(_, _, _) => self.on_down()?,
+            _ => (),
+        };
         Ok(State::Continue)
     }
 
@@ -384,8 +402,6 @@ impl<'a> TuiApp<'a> {
         if pattern.is_empty() {
             self.hits.clear();
         } else {
-            self.search_in_progress = true;
-
             let regex = if self.config.flags.regex {
                 RegexBuilder::new(pattern)
             } else {

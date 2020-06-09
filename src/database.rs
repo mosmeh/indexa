@@ -153,6 +153,7 @@ impl DatabaseBuilder {
                 created: false,
                 modified: false,
                 accessed: false,
+                ignore_hidden: false,
             },
         }
     }
@@ -179,6 +180,11 @@ impl DatabaseBuilder {
 
     pub fn accessed(&mut self, yes: bool) -> &mut Self {
         self.index_flags.accessed = yes;
+        self
+    }
+
+    pub fn ignore_hidden(&mut self, yes: bool) -> &mut Self {
+        self.index_flags.ignore_hidden = yes;
         self
     }
 
@@ -363,6 +369,7 @@ struct IndexFlags {
     created: bool,
     modified: bool,
     accessed: bool,
+    ignore_hidden: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -465,7 +472,10 @@ fn walk_file_system(
     if let Ok(rd) = path.read_dir() {
         let children = rd
             .filter_map(|dent| {
-                dent.ok().and_then(|dent| {
+                dent.ok().as_ref().and_then(|dent| {
+                    if index_flags.ignore_hidden && is_hidden(dent) {
+                        return None;
+                    }
                     EntryPrecursor::from_dir_entry(&dent, index_flags)
                         .ok()
                         .map(|precursor| (dent.path(), precursor))
@@ -491,5 +501,32 @@ fn walk_file_system(
             .for_each_with(database, |database, (path, index)| {
                 walk_file_system(database.clone(), index_flags, path, *index);
             });
+    }
+}
+
+// taken from https://github.com/BurntSushi/ripgrep/blob/1b2c1dc67583d70d1d16fc93c90db80bead4fb09/crates/ignore/src/pathutil.rs#L6-L46
+
+#[cfg(unix)]
+fn is_hidden(dent: &DirEntry) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+
+    if let Some(name) = dent.path().file_name() {
+        name.as_bytes().get(0) == Some(&b'.')
+    } else {
+        false
+    }
+}
+
+#[cfg(windows)]
+fn is_hidden(dent: &DirEntry) -> bool {
+    if let Ok(metadata) = dent.metadata() {
+        if Mode::from(&metadata).is_hidden() {
+            return true;
+        }
+    }
+    if let Some(name) = dent.path().file_name() {
+        name.to_str().map(|s| s.starts_with('.')).unwrap_or(false)
+    } else {
+        false
     }
 }

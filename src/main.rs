@@ -61,7 +61,9 @@ fn main() -> Result<()> {
                 IndexKind::Mode => db_builder.mode(true),
             };
         }
-        let database = db_builder.build()?;
+        let database = db_builder
+            .ignore_hidden(config.database.ignore_hidden)
+            .build()?;
 
         let mut writer = BufWriter::new(File::create(&config.database.location)?);
         bincode::serialize_into(&mut writer, &database)?;

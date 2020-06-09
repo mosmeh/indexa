@@ -21,6 +21,13 @@ impl From<u32> for Mode {
     }
 }
 
+impl Mode {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
 trait HasFlag: Copy {
     fn has_flag(&self, other: Self) -> bool;
 }
@@ -28,12 +35,5 @@ trait HasFlag: Copy {
 impl HasFlag for u32 {
     fn has_flag(&self, flag: Self) -> bool {
         self & flag == flag
-    }
-}
-
-impl Mode {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Default::default()
     }
 }

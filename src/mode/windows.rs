@@ -22,12 +22,14 @@ impl From<&Metadata> for Mode {
 }
 
 impl Mode {
-    #[allow(dead_code)]
+    pub fn is_hidden(&self) -> bool {
+        self.0.has_flag(FILE_ATTRIBUTE_HIDDEN)
+    }
+
     pub fn display_traditional(&self) -> DisplayTraditional {
         DisplayTraditional(self.0)
     }
 
-    #[allow(dead_code)]
     pub fn display_powershell(&self) -> DisplayPowerShell {
         DisplayPowerShell(self.0)
     }

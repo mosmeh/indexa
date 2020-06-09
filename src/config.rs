@@ -49,6 +49,7 @@ pub struct DatabaseConfig {
     pub location: PathBuf,
     pub index: Vec<IndexKind>,
     pub dir: PathBuf,
+    pub ignore_hidden: bool,
 }
 
 impl Default for DatabaseConfig {
@@ -57,6 +58,7 @@ impl Default for DatabaseConfig {
             location: PathBuf::from("database"),
             index: Vec::new(),
             dir: dirs::home_dir().unwrap(),
+            ignore_hidden: false,
         }
     }
 }
