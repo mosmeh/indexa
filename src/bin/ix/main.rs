@@ -52,7 +52,12 @@ fn main() -> Result<()> {
             println!("Creating database");
         }
 
-        let mut db_builder = DatabaseBuilder::new(&config.database.dir);
+        let mut db_builder = DatabaseBuilder::new();
+
+        for dir in &config.database.dirs {
+            db_builder.add_dir(&dir);
+        }
+
         for kind in &config.database.index {
             match kind {
                 IndexKind::Size => db_builder.size(true),
@@ -62,6 +67,7 @@ fn main() -> Result<()> {
                 IndexKind::Mode => db_builder.mode(true),
             };
         }
+
         let database = db_builder
             .ignore_hidden(config.database.ignore_hidden)
             .build()?;

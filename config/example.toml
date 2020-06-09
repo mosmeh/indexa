@@ -1,0 +1,35 @@
+[database]
+location = "database"
+index = [
+    "size",
+    "modified"
+]
+dirs = [
+    "/"
+]
+
+[ui]
+sort_by = "modified"
+sort_order = "descending"
+human_readable_size = true
+datetime_format = "%Y/%m/%d %T"
+
+[[ui.columns]]
+kind = "basename"
+
+[[ui.columns]]
+kind = "size"
+width = 9
+
+[[ui.columns]]
+kind = "modified"
+width = 20
+
+[[ui.columns]]
+kind = "path"
+
+[ui.unix]
+mode_format = "symbolic"
+
+[ui.windows]
+mode_format = "traditional"

@@ -48,7 +48,7 @@ impl FlagConfig {
 pub struct DatabaseConfig {
     pub location: PathBuf,
     pub index: Vec<IndexKind>,
-    pub dir: PathBuf,
+    pub dirs: Vec<PathBuf>,
     pub ignore_hidden: bool,
 }
 
@@ -57,7 +57,7 @@ impl Default for DatabaseConfig {
         Self {
             location: PathBuf::from("database"),
             index: Vec::new(),
-            dir: dirs::home_dir().unwrap(),
+            dirs: vec![dirs::home_dir().unwrap()],
             ignore_hidden: false,
         }
     }

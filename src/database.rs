@@ -128,7 +128,8 @@ impl<'a> Database {
 
     fn path_from_node_impl(&self, index: usize, mut buf: &mut PathBuf) {
         let dir = &self.dirs[index];
-        if dir.parent == 0 {
+        if dir.parent == index {
+            // root node
             buf.push(&self.dirs[dir.parent].name);
         } else {
             self.path_from_node_impl(dir.parent, &mut buf);
@@ -138,14 +139,14 @@ impl<'a> Database {
 }
 
 pub struct DatabaseBuilder {
-    path: PathBuf,
+    dirs: Vec<PathBuf>,
     index_flags: IndexFlags,
 }
 
-impl DatabaseBuilder {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+impl Default for DatabaseBuilder {
+    fn default() -> Self {
         Self {
-            path: path.as_ref().to_path_buf(),
+            dirs: Vec::new(),
             index_flags: IndexFlags {
                 size: false,
                 mode: false,
@@ -155,6 +156,17 @@ impl DatabaseBuilder {
                 ignore_hidden: false,
             },
         }
+    }
+}
+
+impl DatabaseBuilder {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn add_dir<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
+        self.dirs.push(path.as_ref().to_path_buf());
+        self
     }
 
     pub fn size(&mut self, yes: bool) -> &mut Self {
@@ -188,26 +200,58 @@ impl DatabaseBuilder {
     }
 
     pub fn build(&self) -> Result<Database> {
-        let root_precursor = EntryPrecursor::from_path(&self.path, &self.index_flags)?;
-        let root_node = EntryNode {
-            name: root_precursor.name,
-            parent: 0, // points to itself
-        };
-        let mut database = Database {
+        let database = Database {
             files: Vec::new(),
-            dirs: vec![root_node],
+            dirs: Vec::new(),
             file_statuses: EntryStatusVec::new(&self.index_flags),
             dir_statuses: EntryStatusVec::new(&IndexFlags {
                 size: false,
                 ..self.index_flags
             }),
         };
-        database.dir_statuses.push(&root_precursor.status);
 
         let database = Arc::new(Mutex::new(database));
-        walk_file_system(database.clone(), &self.index_flags, &self.path, 0);
 
-        // safe to unwrap since create_node, which is the only user of database, has returned
+        let mut dirs = self
+            .dirs
+            .iter()
+            .filter_map(|path| {
+                if let Ok(canonicalized) = dunce::canonicalize(path) {
+                    if let Some(path_str) = canonicalized.to_str() {
+                        let path_str = path_str.to_string();
+                        return Some((canonicalized, path_str));
+                    }
+                }
+                None
+            })
+            .collect::<Vec<_>>();
+
+        // remove redundant subdirectories
+        // we use str::starts_with, because Path::starts_with doesn't work well for Windows paths
+        dirs.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
+        dirs.dedup_by(|(_, a), (_, b)| a.starts_with(&b as &str));
+
+        for (path, path_str) in &dirs {
+            let root_precursor = EntryPrecursor::from_path(&path, &self.index_flags)?;
+
+            let root_node_id = {
+                let mut db = database.lock().unwrap();
+
+                let root_node_id = db.dirs.len();
+                let root_node = EntryNode {
+                    name: (*path_str).clone(),
+                    parent: root_node_id, // points to itself
+                };
+                db.dirs.push(root_node);
+                db.dir_statuses.push(&root_precursor.status);
+
+                root_node_id
+            };
+
+            walk_file_system(database.clone(), &self.index_flags, &path, root_node_id);
+        }
+
+        // safe to unwrap since above codes are the only users of database at the moment
         Ok(Arc::try_unwrap(database).unwrap().into_inner().unwrap())
     }
 }
