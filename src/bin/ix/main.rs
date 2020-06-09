@@ -2,9 +2,10 @@ mod config;
 mod tui;
 mod worker;
 
+use indexa::database::DatabaseBuilder;
+
 use anyhow::Result;
 use config::{Config, IndexKind};
-use indexa::DatabaseBuilder;
 use rayon::ThreadPoolBuilder;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};

@@ -1,9 +1,11 @@
 use crate::config::{ColumnKind, Config, SortOrder};
+
+use indexa::database::{Database, Entry, EntryId};
+use indexa::matcher::Matcher;
+
 use anyhow::Result;
 use crossbeam::channel::{self, Receiver, Sender};
-use indexa::{Database, Entry, EntryId};
 use rayon::prelude::*;
-use regex::Regex;
 use std::cmp;
 use std::fs::File;
 use std::io::BufReader;
@@ -47,7 +49,7 @@ impl Searcher {
     pub fn run(
         config: &Config,
         database: Arc<Database>,
-        rx: Receiver<Regex>,
+        rx: Receiver<Matcher>,
         tx: Sender<Vec<EntryId>>,
     ) -> Result<Self> {
         let (stop_tx, stop_rx) = channel::unbounded();
@@ -70,11 +72,10 @@ impl Searcher {
 }
 
 struct SearcherImpl {
-    in_path: bool,
     sort_by: ColumnKind,
     sort_order: SortOrder,
     database: Arc<Database>,
-    pattern_rx: Receiver<Regex>,
+    matcher_rx: Receiver<Matcher>,
     stop_rx: Receiver<()>,
     tx: Sender<Vec<EntryId>>,
     search: Option<Search>,
@@ -84,16 +85,15 @@ impl SearcherImpl {
     fn new(
         config: &Config,
         database: Arc<Database>,
-        pattern_rx: Receiver<Regex>,
+        matcher_rx: Receiver<Matcher>,
         stop_rx: Receiver<()>,
         tx: Sender<Vec<EntryId>>,
     ) -> Self {
         Self {
-            in_path: config.flags.in_path,
             sort_by: config.ui.sort_by,
             sort_order: config.ui.sort_order,
             database,
-            pattern_rx,
+            matcher_rx,
             stop_rx,
             tx,
             search: None,
@@ -103,23 +103,22 @@ impl SearcherImpl {
     fn run(&mut self) -> Result<()> {
         loop {
             channel::select! {
-                recv(self.pattern_rx) -> pattern => {
+                recv(self.matcher_rx) -> matcher => {
                     if let Some(search) = self.search.take() {
                         search.abort();
                     }
 
-                    let pattern = pattern?;
+                    let matcher = matcher?;
                     let database = self.database.clone();
                     let tx_clone = self.tx.clone();
                     let aborted = Arc::new(AtomicBool::new(false));
                     let aborted_clone = aborted.clone();
 
-                    let in_path = self.in_path;
                     let compare_func = build_compare_func(&self.sort_by, &self.sort_order);
 
                     let thread = thread::spawn(move || {
                         let hits = {
-                            let result = database.abortable_search(&pattern, in_path, aborted.clone());
+                            let result = database.abortable_search(&matcher, aborted.clone());
                             result.map(|mut hits| {
                                 hits.as_parallel_slice_mut()
                                     .par_sort_unstable_by(|a, b| {

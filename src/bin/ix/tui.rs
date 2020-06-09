@@ -1,7 +1,16 @@
+mod table;
 mod text_box;
 
 use crate::config::{ColumnKind, Config};
 use crate::worker::{Loader, Searcher};
+
+use table::{HighlightableText, Row, Table, TableState};
+use text_box::{TextBox, TextBoxState};
+
+use indexa::database::{Database, Entry, EntryId};
+use indexa::matcher::{MatchDetail, Matcher, MatcherBuilder};
+use indexa::mode::Mode;
+
 use anyhow::Result;
 use chrono::offset::Local;
 use chrono::DateTime;
@@ -11,17 +20,14 @@ use crossterm::event::{
     MouseEvent,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use indexa::mode::Mode;
-use indexa::{Database, Entry, EntryId};
-use regex::{Regex, RegexBuilder};
 use std::io::{self, Write};
+use std::ops::Range;
 use std::sync::Arc;
 use std::thread;
-use text_box::{TextBox, TextBoxState};
 use tui::backend::CrosstermBackend;
 use tui::layout::{Constraint, Layout};
 use tui::style::{Color, Modifier, Style};
-use tui::widgets::{Paragraph, Row, Table, TableState, Text};
+use tui::widgets::{Paragraph, Text};
 use tui::Frame;
 use tui::Terminal;
 
@@ -47,10 +53,11 @@ struct TuiApp<'a> {
     config: &'a Config,
     database: Option<Arc<Database>>,
     text_box_state: TextBoxState,
+    matcher: Option<Matcher>,
     hits: Vec<EntryId>,
     selected: usize,
     search_in_progress: bool,
-    pattern_tx: Option<Sender<Regex>>,
+    matcher_tx: Option<Sender<Matcher>>,
 }
 
 impl<'a> TuiApp<'a> {
@@ -59,10 +66,11 @@ impl<'a> TuiApp<'a> {
             config,
             database: None,
             text_box_state: Default::default(),
+            matcher: None,
             hits: Vec::new(),
             selected: 0,
             search_in_progress: false,
-            pattern_tx: None,
+            matcher_tx: None,
         };
         Ok(app)
     }
@@ -105,11 +113,11 @@ impl<'a> TuiApp<'a> {
             let database = Arc::new(database);
             self.database = Some(Arc::clone(&database));
 
-            let (pattern_tx, pattern_rx) = channel::unbounded();
+            let (matcher_tx, matcher_rx) = channel::unbounded();
             let (result_tx, result_rx) = channel::unbounded();
-            let searcher = Searcher::run(self.config, database, pattern_rx, result_tx)?;
+            let searcher = Searcher::run(self.config, database, matcher_rx, result_tx)?;
 
-            self.pattern_tx = Some(pattern_tx);
+            self.matcher_tx = Some(matcher_tx);
             self.on_pattern_change()?;
 
             loop {
@@ -176,7 +184,7 @@ impl<'a> TuiApp<'a> {
             .highlight_style(Style::default().fg(Color::Black).bg(Color::White))
             .prompt(Text::styled(
                 "> ",
-                Style::default().fg(Color::Green).modifier(Modifier::BOLD),
+                Style::default().fg(Color::Blue).modifier(Modifier::BOLD),
             ));
         f.render_stateful_widget(text_box, chunks[2], &mut self.text_box_state);
     }
@@ -191,17 +199,18 @@ impl<'a> TuiApp<'a> {
 
         let items = self.hits.iter().map(|id| {
             let entry = self.database.as_ref().unwrap().entry(id);
+            let match_detail = self.matcher.as_ref().unwrap().match_detail(&entry).unwrap();
             let columns = self
                 .config
                 .ui
                 .columns
                 .iter()
                 .map(|column| {
-                    self.display_column_content(&column.kind, &entry)
-                        .unwrap_or_else(|| "".to_string())
+                    self.display_column_content(&column.kind, &entry, &match_detail)
+                        .unwrap_or_else(|| HighlightableText::Raw("".to_string()))
                 })
                 .collect::<Vec<_>>();
-            Row::Data(columns.into_iter())
+            Row::new(columns.into_iter())
         });
 
         let (num_fixed, sum_widths) =
@@ -235,8 +244,10 @@ impl<'a> TuiApp<'a> {
 
         let table = Table::new(header, items)
             .widths(&widths)
-            .highlight_style(Style::default().fg(Color::Green).modifier(Modifier::BOLD))
-            .highlight_symbol("> ");
+            .selected_style(Style::default().fg(Color::Blue))
+            .highlight_style(Style::default().fg(Color::Black).bg(Color::Blue))
+            .selected_highlight_style(Style::default().fg(Color::Black).bg(Color::Blue))
+            .selected_symbol("> ");
 
         let mut table_state = TableState::default();
         table_state.select(Some(self.selected));
@@ -244,16 +255,36 @@ impl<'a> TuiApp<'a> {
         f.render_stateful_widget(table, area, &mut table_state);
     }
 
-    fn display_column_content(&self, kind: &ColumnKind, entry: &Entry) -> Option<String> {
+    fn display_column_content(
+        &self,
+        kind: &ColumnKind,
+        entry: &Entry,
+        match_detail: &MatchDetail,
+    ) -> Option<HighlightableText<impl Iterator<Item = Range<usize>>>> {
         match kind {
-            ColumnKind::Basename => Some(entry.basename().to_string()),
-            ColumnKind::FullPath => entry.path().to_str().map(|s| s.to_string()),
-            ColumnKind::Extension => entry.extension().map(|s| s.to_string()),
-            ColumnKind::Size => self.display_size(entry.size()),
-            ColumnKind::Mode => self.display_mode(entry.mode()),
-            ColumnKind::Created => self.display_datetime(entry.created()),
-            ColumnKind::Modified => self.display_datetime(entry.modified()),
-            ColumnKind::Accessed => self.display_datetime(entry.accessed()),
+            ColumnKind::Basename => Some(HighlightableText::Highlighted(
+                entry.basename().to_string(),
+                match_detail.basename_matches().into_iter(),
+            )),
+
+            ColumnKind::FullPath => Some(HighlightableText::Highlighted(
+                match_detail.path_str().to_string(),
+                match_detail.path_matches().into_iter(),
+            )),
+            ColumnKind::Extension => entry
+                .extension()
+                .map(|s| HighlightableText::Raw(s.to_string())),
+            ColumnKind::Size => self.display_size(entry.size()).map(HighlightableText::Raw),
+            ColumnKind::Mode => self.display_mode(entry.mode()).map(HighlightableText::Raw),
+            ColumnKind::Created => self
+                .display_datetime(entry.created())
+                .map(HighlightableText::Raw),
+            ColumnKind::Modified => self
+                .display_datetime(entry.modified())
+                .map(HighlightableText::Raw),
+            ColumnKind::Accessed => self
+                .display_datetime(entry.accessed())
+                .map(HighlightableText::Raw),
         }
     }
 
@@ -402,17 +433,16 @@ impl<'a> TuiApp<'a> {
         if pattern.is_empty() {
             self.hits.clear();
         } else {
-            let regex = if self.config.flags.regex {
-                RegexBuilder::new(pattern)
-            } else {
-                RegexBuilder::new(&regex::escape(pattern))
-            }
-            .case_insensitive(!self.config.flags.case_sensitive)
-            .build();
+            let matcher = MatcherBuilder::new(pattern)
+                .in_path(self.config.flags.in_path)
+                .case_insensitive(!self.config.flags.case_sensitive)
+                .regex(self.config.flags.regex)
+                .build();
 
-            if let Ok(pattern) = regex {
+            if let Ok(matcher) = matcher {
+                self.matcher = Some(matcher.clone());
                 self.search_in_progress = true;
-                self.pattern_tx.as_ref().unwrap().send(pattern)?;
+                self.matcher_tx.as_ref().unwrap().send(matcher)?;
             }
         }
 

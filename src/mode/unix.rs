@@ -35,12 +35,10 @@ impl From<&Metadata> for Mode {
 }
 
 impl Mode {
-    #[allow(dead_code)]
     pub fn display_octal(&self) -> DisplayOctal {
         DisplayOctal(self.0)
     }
 
-    #[allow(dead_code)]
     pub fn display_symbolic(&self) -> DisplaySymbolic {
         DisplaySymbolic(self.0)
     }

@@ -1,7 +1,7 @@
+use crate::matcher::Matcher;
 use crate::mode::Mode;
 use crate::{Error, Result};
 use rayon::prelude::*;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs::{DirEntry, FileType, Metadata};
 use std::path::{Path, PathBuf};
@@ -22,16 +22,16 @@ impl<'a> Database {
         self.files.len() + self.dirs.len()
     }
 
-    pub fn search(&self, pattern: &Regex, in_path: bool) -> Vec<EntryId> {
+    pub fn search(&self, matcher: &Matcher) -> Vec<EntryId> {
         let match_file = |(i, node): (usize, &EntryNode)| {
-            if self.node_matches(node, pattern, in_path) {
+            if self.node_matches(node, matcher) {
                 Some(EntryId::File(i))
             } else {
                 None
             }
         };
         let match_dir = |(i, node): (usize, &EntryNode)| {
-            if self.node_matches(node, pattern, in_path) {
+            if self.node_matches(node, matcher) {
                 Some(EntryId::Directory(i))
             } else {
                 None
@@ -52,14 +52,13 @@ impl<'a> Database {
 
     pub fn abortable_search(
         &self,
-        pattern: &Regex,
-        in_path: bool,
+        matcher: &Matcher,
         aborted: Arc<AtomicBool>,
     ) -> Result<Vec<EntryId>> {
         let match_file = |(i, node): (usize, &EntryNode)| {
             if aborted.load(Ordering::Relaxed) {
                 Some(Err(Error::SearchAbort))
-            } else if self.node_matches(node, pattern, in_path) {
+            } else if self.node_matches(node, matcher) {
                 Some(Ok(EntryId::File(i)))
             } else {
                 None
@@ -68,7 +67,7 @@ impl<'a> Database {
         let match_dir = |(i, node): (usize, &EntryNode)| {
             if aborted.load(Ordering::Relaxed) {
                 Some(Err(Error::SearchAbort))
-            } else if self.node_matches(node, pattern, in_path) {
+            } else if self.node_matches(node, matcher) {
                 Some(Ok(EntryId::Directory(i)))
             } else {
                 None
@@ -91,14 +90,14 @@ impl<'a> Database {
         Entry { database: self, id }
     }
 
-    fn node_matches(&self, node: &EntryNode, pattern: &Regex, in_path: bool) -> bool {
-        if in_path {
+    fn node_matches(&self, node: &EntryNode, matcher: &Matcher) -> bool {
+        if matcher.in_path {
             if let Some(path) = self.path_from_node(node).to_str() {
-                if pattern.is_match(path) {
+                if matcher.pattern.is_match(path) {
                     return true;
                 }
             }
-        } else if pattern.is_match(&node.name) {
+        } else if matcher.pattern.is_match(&node.name) {
             return true;
         }
         false
