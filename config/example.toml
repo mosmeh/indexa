@@ -1,3 +1,6 @@
+[flags]
+auto_in_path = true
+
 [database]
 location = "database"
 index = [

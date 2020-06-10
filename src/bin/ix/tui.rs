@@ -24,8 +24,9 @@ use std::io::{self, Write};
 use std::ops::Range;
 use std::sync::Arc;
 use std::thread;
+use std::time::SystemTime;
 use tui::backend::CrosstermBackend;
-use tui::layout::{Constraint, Layout};
+use tui::layout::{Constraint, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
 use tui::widgets::{Paragraph, Text};
 use tui::Frame;
@@ -57,6 +58,7 @@ struct TuiApp<'a> {
     hits: Vec<EntryId>,
     selected: usize,
     search_in_progress: bool,
+    page_shift_amount: u16,
     matcher_tx: Option<Sender<Matcher>>,
 }
 
@@ -70,6 +72,7 @@ impl<'a> TuiApp<'a> {
             hits: Vec::new(),
             selected: 0,
             search_in_progress: false,
+            page_shift_amount: 0,
             matcher_tx: None,
         };
         Ok(app)
@@ -91,7 +94,7 @@ impl<'a> TuiApp<'a> {
         let (input_tx, input_rx) = channel::unbounded();
         thread::spawn(move || loop {
             if let Ok(event) = event::read() {
-                input_tx.send(event).unwrap();
+                let _ = input_tx.send(event);
             }
         });
 
@@ -99,7 +102,7 @@ impl<'a> TuiApp<'a> {
             let terminal_width = terminal.size()?.width;
             terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
             channel::select! {
-                recv(load_rx) -> database => break Some(database?),
+                recv(load_rx) -> database => break Some(database??),
                 recv(input_rx) -> event => {
                     match self.handle_input(event?)? {
                         State::Aborted | State::Accepted => break None,
@@ -129,15 +132,12 @@ impl<'a> TuiApp<'a> {
                     }
                     recv(input_rx) -> event => {
                         match self.handle_input(event?)? {
-                            State::Aborted => {
-                                cleanup_terminal(terminal)?;
-                                break;
-                            }
-                             State::Accepted => {
-                                cleanup_terminal(terminal)?;
+                            State::Aborted => break,
+                            State::Accepted => {
+                                cleanup_terminal(&mut terminal)?;
                                 self.on_accept()?;
                                 break;
-                             }
+                            }
                             _ => (),
                         }
                     }
@@ -147,6 +147,7 @@ impl<'a> TuiApp<'a> {
             searcher.finish()?;
         }
 
+        cleanup_terminal(&mut terminal)?;
         loader.finish()?;
 
         Ok(())
@@ -189,7 +190,7 @@ impl<'a> TuiApp<'a> {
         f.render_stateful_widget(text_box, chunks[2], &mut self.text_box_state);
     }
 
-    fn draw_table(&self, f: &mut Frame<Backend>, area: tui::layout::Rect, terminal_width: u16) {
+    fn draw_table(&mut self, f: &mut Frame<Backend>, area: Rect, terminal_width: u16) {
         let header = self
             .config
             .ui
@@ -247,12 +248,22 @@ impl<'a> TuiApp<'a> {
             .selected_style(Style::default().fg(Color::Blue))
             .highlight_style(Style::default().fg(Color::Black).bg(Color::Blue))
             .selected_highlight_style(Style::default().fg(Color::Black).bg(Color::Blue))
-            .selected_symbol("> ");
+            .selected_symbol("> ")
+            .header_gap(1);
 
         let mut table_state = TableState::default();
         table_state.select(Some(self.selected));
 
         f.render_stateful_widget(table, area, &mut table_state);
+
+        self.page_shift_amount = area.height.saturating_sub(
+            // header
+            1 +
+            // header_gap
+            1 +
+            // one less than page height
+            1,
+        );
     }
 
     fn display_column_content(
@@ -314,7 +325,7 @@ impl<'a> TuiApp<'a> {
         })
     }
 
-    fn display_datetime(&self, time: Option<&std::time::SystemTime>) -> Option<String> {
+    fn display_datetime(&self, time: Option<&SystemTime>) -> Option<String> {
         time.map(|t| {
             let datetime = DateTime::<Local>::from(*t);
             format!("{}", datetime.format(&self.config.ui.datetime_format))
@@ -367,6 +378,8 @@ impl<'a> TuiApp<'a> {
             (_, KeyCode::Down)
             | (KeyModifiers::CONTROL, KeyCode::Char('n'))
             | (KeyModifiers::CONTROL, KeyCode::Char('j')) => self.on_down()?,
+            (_, KeyCode::PageUp) => self.on_pageup()?,
+            (_, KeyCode::PageDown) => self.on_pagedown()?,
             (_, KeyCode::Char(c)) => {
                 self.text_box_state.on_char(c);
                 self.on_pattern_change()?;
@@ -387,8 +400,12 @@ impl<'a> TuiApp<'a> {
 
     fn handle_search_result(&mut self, hits: Vec<EntryId>) -> Result<()> {
         self.hits = hits;
-        self.selected = self.selected.min(self.hits.len().saturating_sub(1));
         self.search_in_progress = false;
+
+        if !self.hits.is_empty() {
+            self.selected = self.selected.min(self.hits.len() - 1);
+        }
+
         Ok(())
     }
 
@@ -403,6 +420,25 @@ impl<'a> TuiApp<'a> {
     fn on_down(&mut self) -> Result<()> {
         if !self.hits.is_empty() {
             self.selected = (self.selected + 1).min(self.hits.len() - 1);
+        }
+
+        Ok(())
+    }
+
+    fn on_pageup(&mut self) -> Result<()> {
+        if !self.hits.is_empty() {
+            self.selected = self
+                .selected
+                .saturating_sub(self.page_shift_amount as usize);
+        }
+
+        Ok(())
+    }
+
+    fn on_pagedown(&mut self) -> Result<()> {
+        if !self.hits.is_empty() {
+            self.selected =
+                (self.selected + self.page_shift_amount as usize).min(self.hits.len() - 1);
         }
 
         Ok(())
@@ -435,6 +471,7 @@ impl<'a> TuiApp<'a> {
         } else {
             let matcher = MatcherBuilder::new(pattern)
                 .in_path(self.config.flags.in_path)
+                .auto_in_path(self.config.flags.auto_in_path)
                 .case_insensitive(!self.config.flags.case_sensitive)
                 .regex(self.config.flags.regex)
                 .build();
@@ -450,7 +487,7 @@ impl<'a> TuiApp<'a> {
     }
 }
 
-fn cleanup_terminal(mut terminal: Terminal<Backend>) -> Result<()> {
+fn cleanup_terminal(terminal: &mut Terminal<Backend>) -> Result<()> {
     terminal.show_cursor()?;
     terminal::disable_raw_mode()?;
     crossterm::execute!(

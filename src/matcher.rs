@@ -36,6 +36,7 @@ impl Matcher {
 pub struct MatcherBuilder<'a> {
     pattern_str: Cow<'a, str>,
     in_path: bool,
+    auto_in_path: bool,
     case_insensitive: bool,
     regex: bool,
 }
@@ -48,6 +49,7 @@ impl<'a> MatcherBuilder<'a> {
         Self {
             pattern_str: pattern_str.into(),
             in_path: false,
+            auto_in_path: false,
             case_insensitive: false,
             regex: false,
         }
@@ -55,6 +57,11 @@ impl<'a> MatcherBuilder<'a> {
 
     pub fn in_path(&mut self, yes: bool) -> &mut Self {
         self.in_path = yes;
+        self
+    }
+
+    pub fn auto_in_path(&mut self, yes: bool) -> &mut Self {
+        self.auto_in_path = yes;
         self
     }
 
@@ -79,7 +86,12 @@ impl<'a> MatcherBuilder<'a> {
 
         Ok(Matcher {
             pattern: regex,
-            in_path: self.in_path,
+            in_path: should_search_in_path(
+                self.in_path,
+                self.auto_in_path,
+                self.regex,
+                &self.pattern_str,
+            ),
         })
     }
 }
@@ -138,4 +150,19 @@ impl MatchDetail<'_, '_> {
                 .collect()
         }
     }
+}
+
+fn should_search_in_path(in_path: bool, auto_inpath: bool, regex: bool, pattern_str: &str) -> bool {
+    if in_path {
+        return true;
+    }
+    if !auto_inpath {
+        return false;
+    }
+
+    if regex && std::path::MAIN_SEPARATOR == '\\' {
+        return pattern_str.contains("\\\\");
+    }
+
+    pattern_str.contains(std::path::MAIN_SEPARATOR)
 }

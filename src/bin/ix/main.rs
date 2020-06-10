@@ -20,18 +20,29 @@ use structopt::StructOpt;
     setting(clap::AppSettings::DeriveDisplayOrder)
 )]
 pub struct Opt {
+    /// Search case sensitively.
     #[structopt(short = "s", long)]
     case_sensitive: bool,
 
+    /// Search in path.
     #[structopt(short = "p", long)]
     in_path: bool,
 
+    /// Search in path when pattern contains path separators.
+    #[structopt(long)]
+    auto_in_path: bool,
+
+    /// Enable regex.
     #[structopt(short, long)]
     regex: bool,
 
+    /// Update database and exit.
     #[structopt(short, long)]
     update: bool,
 
+    /// Number of threads to use.
+    ///
+    /// Defaults to the number of available CPUs - 1.
     #[structopt(short, long)]
     threads: Option<usize>,
 }

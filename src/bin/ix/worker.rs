@@ -19,14 +19,12 @@ pub struct Loader {
 }
 
 impl Loader {
-    pub fn run<P>(db_path: P, tx: Sender<Database>) -> Result<Self>
+    pub fn run<P>(db_path: P, tx: Sender<Result<Database>>) -> Result<Self>
     where
         P: 'static + AsRef<Path> + Send,
     {
         let thread = thread::spawn(move || {
-            let reader = BufReader::new(File::open(&db_path).unwrap());
-            let database = bincode::deserialize_from(reader).unwrap();
-            tx.send(database).unwrap();
+            let _ = tx.send(load_database(db_path));
         });
 
         let loader = Self { thread };
@@ -130,7 +128,7 @@ impl SearcherImpl {
                         if !aborted.load(atomic::Ordering::Relaxed) {
                             aborted.store(true, atomic::Ordering::Relaxed);
                             if let Ok(hits) = hits {
-                                tx_clone.send(hits).unwrap();
+                                let _ = tx_clone.send(hits);
                             }
                         }
                     });
@@ -160,6 +158,15 @@ impl Search {
         self.aborted.store(true, atomic::Ordering::Relaxed);
         let _ = self.thread.join();
     }
+}
+
+fn load_database<P>(db_path: P) -> Result<Database>
+where
+    P: AsRef<Path>,
+{
+    let reader = BufReader::new(File::open(&db_path)?);
+    let db: Database = bincode::deserialize_from(reader)?;
+    Ok(db)
 }
 
 fn build_compare_func(

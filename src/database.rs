@@ -234,6 +234,10 @@ impl DatabaseBuilder {
         for (path, path_str) in &dirs {
             let root_precursor = EntryPrecursor::from_path(&path, &self.index_flags)?;
 
+            if !root_precursor.ftype.is_dir() {
+                continue;
+            }
+
             let root_node_id = {
                 let mut db = database.lock().unwrap();
 
@@ -293,7 +297,7 @@ impl Entry<'_, '_> {
 
         let name = &self.node().name;
         if name.contains('.') {
-            Some(name.split('.').last().unwrap())
+            name.split('.').last()
         } else {
             None
         }

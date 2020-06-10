@@ -16,6 +16,7 @@ pub struct Config {
 pub struct FlagConfig {
     pub case_sensitive: bool,
     pub in_path: bool,
+    pub auto_in_path: bool,
     pub regex: bool,
     pub threads: usize,
 }
@@ -25,6 +26,7 @@ impl Default for FlagConfig {
         Self {
             case_sensitive: false,
             in_path: false,
+            auto_in_path: false,
             regex: false,
             threads: (num_cpus::get() - 1).max(1),
         }
@@ -35,6 +37,7 @@ impl FlagConfig {
     pub fn merge_opt(&mut self, opt: &Opt) {
         self.case_sensitive |= opt.case_sensitive;
         self.in_path |= opt.in_path;
+        self.auto_in_path |= opt.auto_in_path;
         self.regex |= opt.regex;
 
         if let Some(threads) = opt.threads {
