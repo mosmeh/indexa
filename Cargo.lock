@@ -338,6 +338,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "dunce",
+ "itertools",
  "num_cpus",
  "rayon",
  "regex",

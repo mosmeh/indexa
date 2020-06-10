@@ -4,12 +4,13 @@
 use cassowary::strength::{MEDIUM, REQUIRED, WEAK};
 use cassowary::WeightedRelation::*;
 use cassowary::{Expression, Solver};
+use itertools::izip;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::iter::{self, Iterator};
 use std::ops::Range;
 use tui::buffer::Buffer;
-use tui::layout::{Constraint, Rect};
+use tui::layout::{Alignment, Constraint, Rect};
 use tui::style::Style;
 use tui::widgets::{Block, Paragraph, StatefulWidget, Text, Widget};
 use unicode_width::UnicodeWidthStr;
@@ -78,6 +79,7 @@ pub struct Table<'a, H, R> {
     header: H,
     header_style: Style,
     widths: &'a [Constraint],
+    alignments: Option<&'a [Alignment]>,
     column_spacing: u16,
     header_gap: u16,
     selected_style: Style,
@@ -99,6 +101,7 @@ where
             header: H::default(),
             header_style: Style::default(),
             widths: &[],
+            alignments: None,
             column_spacing: 1,
             header_gap: 1,
             selected_style: Style::default(),
@@ -124,6 +127,7 @@ where
             header,
             header_style: Style::default(),
             widths: &[],
+            alignments: None,
             column_spacing: 1,
             header_gap: 1,
             selected_style: Style::default(),
@@ -165,6 +169,11 @@ where
             "Percentages should be between 0 and 100 inclusively."
         );
         self.widths = widths;
+        self
+    }
+
+    pub fn alignments(mut self, alignments: &'a [Alignment]) -> Table<'a, H, R> {
+        self.alignments = Some(alignments);
         self
     }
 
@@ -284,13 +293,35 @@ where
             solved_widths[index] = value
         }
 
+        let alignments: Vec<_> = if let Some(alignments) = self.alignments {
+            alignments.iter().collect()
+        } else {
+            iter::repeat(&Alignment::Left)
+                .take(self.widths.iter().count())
+                .collect()
+        };
+
         let mut y = table_area.top();
         let mut x = table_area.left();
 
         // Draw header
         if y < table_area.bottom() {
-            for (w, t) in solved_widths.iter().zip(self.header.by_ref()) {
-                buf.set_stringn(x, y, format!("{}", t), *w as usize, self.header_style);
+            for (w, &&alignment, t) in izip!(
+                solved_widths.iter(),
+                alignments.iter(),
+                self.header.by_ref(),
+            ) {
+                let area = Rect {
+                    x,
+                    y,
+                    width: *w,
+                    height: 1,
+                };
+                let text = Text::styled(format!("{}", t), self.header_style);
+                Paragraph::new(vec![&text].into_iter())
+                    .alignment(alignment)
+                    .render(area, buf);
+
                 x += *w + self.column_spacing;
             }
         }
@@ -330,38 +361,43 @@ where
                         (default_style, self.highlight_style, blank_symbol.as_ref())
                     }
                 };
+
                 x = table_area.left();
-                for (c, (w, elt)) in solved_widths.iter().zip(row.data).enumerate() {
+
+                buf.set_stringn(x, y + i as u16, &symbol, symbol.width(), style);
+                x += symbol.width() as u16;
+
+                for (c, (w, &&alignment, elt)) in
+                    izip!(solved_widths.iter(), alignments.iter(), row.data).enumerate()
+                {
+                    let width = if c == 0 {
+                        *w - symbol.width() as u16
+                    } else {
+                        *w
+                    };
+                    let area = Rect {
+                        x,
+                        y: y + i as u16,
+                        width,
+                        height: 1,
+                    };
+
                     match elt {
                         HighlightableText::Raw(text) => {
-                            let s = if c == 0 {
-                                format!("{}{}", symbol, text)
-                            } else {
-                                text.to_string()
-                            };
-                            buf.set_stringn(x, y + i as u16, s, *w as usize, style);
+                            let text = Text::styled(&text, style);
+                            Paragraph::new(vec![&text].into_iter())
+                                .alignment(alignment)
+                                .render(area, buf);
                         }
                         HighlightableText::Highlighted(text, ranges) => {
                             let texts = build_texts(&text, ranges, &style, &highlight_style);
-                            let area = Rect {
-                                x,
-                                y: y + i as u16,
-                                width: *w,
-                                height: 1,
-                            };
-                            if c == 0 {
-                                Paragraph::new(
-                                    std::iter::once(&Text::styled(symbol, style))
-                                        .chain(texts.iter()),
-                                )
+                            Paragraph::new(texts.iter())
+                                .alignment(alignment)
                                 .render(area, buf);
-                            } else {
-                                Paragraph::new(texts.iter()).render(area, buf);
-                            }
                         }
                     }
 
-                    x += *w + self.column_spacing;
+                    x += width + self.column_spacing;
                 }
             }
         }

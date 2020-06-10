@@ -26,17 +26,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::SystemTime;
 use tui::backend::CrosstermBackend;
-use tui::layout::{Constraint, Layout, Rect};
+use tui::layout::{Alignment, Constraint, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
 use tui::widgets::{Paragraph, Text};
 use tui::Frame;
 use tui::Terminal;
-
-#[cfg(unix)]
-use crate::config::ModeFormatUnix;
-
-#[cfg(windows)]
-use crate::config::ModeFormatWindows;
 
 pub fn run(config: &Config) -> Result<()> {
     TuiApp::new(config)?.run()
@@ -83,13 +77,7 @@ impl<'a> TuiApp<'a> {
         let db_path = self.config.database.location.clone();
         let loader = Loader::run(db_path, load_tx)?;
 
-        terminal::enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-        let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend)?;
-        terminal.hide_cursor()?;
-        terminal.clear()?;
+        let mut terminal = setup_terminal()?;
 
         let (input_tx, input_rx) = channel::unbounded();
         thread::spawn(move || loop {
@@ -191,33 +179,25 @@ impl<'a> TuiApp<'a> {
     }
 
     fn draw_table(&mut self, f: &mut Frame<Backend>, area: Rect, terminal_width: u16) {
-        let header = self
-            .config
-            .ui
-            .columns
-            .iter()
-            .map(|column| format!("{}", column.kind));
+        let columns = &self.config.ui.columns;
+
+        let header = columns.iter().map(|column| format!("{}", column.kind));
 
         let items = self.hits.iter().map(|id| {
             let entry = self.database.as_ref().unwrap().entry(id);
             let match_detail = self.matcher.as_ref().unwrap().match_detail(&entry).unwrap();
-            let columns = self
-                .config
-                .ui
-                .columns
+            let contents = columns
                 .iter()
                 .map(|column| {
                     self.display_column_content(&column.kind, &entry, &match_detail)
                         .unwrap_or_else(|| HighlightableText::Raw("".to_string()))
                 })
                 .collect::<Vec<_>>();
-            Row::new(columns.into_iter())
+            Row::new(contents.into_iter())
         });
 
         let (num_fixed, sum_widths) =
-            self.config
-                .ui
-                .columns
+            columns
                 .iter()
                 .fold((0, 0), |(num_fixed, sum_widths), column| {
                     if let Some(width) = column.width {
@@ -227,24 +207,30 @@ impl<'a> TuiApp<'a> {
                     }
                 });
         let remaining_width = terminal_width - sum_widths;
-        let num_flexible = self.config.ui.columns.len() as u16 - num_fixed;
-        let flexible_width = remaining_width / num_flexible;
-        let widths = self
-            .config
-            .ui
-            .columns
+        let num_flexible = columns.len() as u16 - num_fixed;
+        let flexible_width = remaining_width.checked_div(num_flexible);
+        let widths = columns
             .iter()
             .map(|column| {
                 if let Some(width) = column.width {
                     Constraint::Length(width)
                 } else {
-                    Constraint::Min(flexible_width)
+                    Constraint::Min(flexible_width.unwrap())
                 }
+            })
+            .collect::<Vec<_>>();
+
+        let alignments = columns
+            .iter()
+            .map(|column| match column.kind {
+                ColumnKind::Size => Alignment::Right,
+                _ => Alignment::Left,
             })
             .collect::<Vec<_>>();
 
         let table = Table::new(header, items)
             .widths(&widths)
+            .alignments(&alignments)
             .selected_style(Style::default().fg(Color::Blue))
             .highlight_style(Style::default().fg(Color::Black).bg(Color::Blue))
             .selected_highlight_style(Style::default().fg(Color::Black).bg(Color::Blue))
@@ -311,6 +297,8 @@ impl<'a> TuiApp<'a> {
 
     #[cfg(unix)]
     fn display_mode(&self, mode: Option<Mode>) -> Option<String> {
+        use crate::config::ModeFormatUnix;
+
         mode.map(|m| match self.config.ui.unix.mode_format {
             ModeFormatUnix::Octal => format!("{}", m.display_octal()),
             ModeFormatUnix::Symbolic => format!("{}", m.display_symbolic()),
@@ -319,6 +307,8 @@ impl<'a> TuiApp<'a> {
 
     #[cfg(windows)]
     fn display_mode(&self, mode: Option<Mode>) -> Option<String> {
+        use crate::config::ModeFormatWindows;
+
         mode.map(|m| match self.config.ui.windows.mode_format {
             ModeFormatWindows::Traditional => format!("{}", m.display_traditional()),
             ModeFormatWindows::PowerShell => format!("{}", m.display_powershell()),
@@ -485,6 +475,18 @@ impl<'a> TuiApp<'a> {
 
         Ok(())
     }
+}
+
+fn setup_terminal() -> Result<Terminal<Backend>> {
+    terminal::enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.hide_cursor()?;
+    terminal.clear()?;
+
+    Ok(terminal)
 }
 
 fn cleanup_terminal(terminal: &mut Terminal<Backend>) -> Result<()> {
