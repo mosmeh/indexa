@@ -1,0 +1,71 @@
+# Default values for command-line flags.
+# Flags provided to CLI will override this config.
+[flags]
+# Whether to search case sensitively.
+# case_sensitive = false
+
+# Whether to search in path.
+# match_path = false
+
+# Whether to search in path when query contains path separators.
+# auto_match_path = false
+
+# Whether to enable regex.
+# regex = true
+
+[database]
+# Location of database file. Defaults to {the user's data directory}/indexa/database.db
+# location = "/path/to/database/database.db"
+
+# File/directory statuses to index. [size, mode, created, modified, accessed]
+index = [
+    "size",
+    "modified"
+]
+
+# Root directories to index.
+# dirs = [
+#     "/"
+# ]
+
+# Whether to ignore hidden files/directories.
+ignore_hidden = false
+
+[ui]
+# Column to sort by. [basename, path, extension, size, mode, created, modified, accessed]
+sort_by = "basename"
+
+# Sort order. [ascending, descending]
+sort_order = "ascending"
+
+# Whether to show size in human readable format.
+human_readable_size = true
+
+# Datetime format for Created, Modified, and Accessed column.
+datetime_format = "%Y/%m/%d %T"
+
+# Columns from left to right.
+# kind is one of: [basename, path, extension, size, mode, created, modified, accessed]
+# Columns with width specified will have fixed widths.
+# Remaining screen width is evenly distributed among other columns.
+[[ui.columns]]
+kind = "basename"
+
+[[ui.columns]]
+kind = "size"
+width = 9
+
+[[ui.columns]]
+kind = "modified"
+width = 20
+
+[[ui.columns]]
+kind = "path"
+
+[ui.unix]
+# Format of mode column. [octal, symbolic]
+mode_format = "symbolic"
+
+[ui.windows]
+# Format of mode column. [traditional, powershell]
+mode_format = "traditional"

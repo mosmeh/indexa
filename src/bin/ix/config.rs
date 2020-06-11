@@ -1,7 +1,11 @@
 use crate::Opt;
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -49,7 +53,7 @@ impl FlagConfig {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
-    pub location: PathBuf,
+    pub location: Option<PathBuf>,
     pub index: Vec<IndexKind>,
     pub dirs: Vec<PathBuf>,
     pub ignore_hidden: bool,
@@ -57,10 +61,28 @@ pub struct DatabaseConfig {
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
+        let location = dirs::data_dir().map(|data_dir| {
+            let mut path = data_dir;
+            path.push(env!("CARGO_PKG_NAME"));
+            path.push("database.db");
+            path
+        });
+
+        let default_root = if cfg!(windows) {
+            PathBuf::from("C:\\")
+        } else {
+            PathBuf::from("/")
+        };
+        let dirs = if default_root.exists() {
+            vec![default_root]
+        } else {
+            Vec::new()
+        };
+
         Self {
-            location: PathBuf::from("database"),
+            location,
             index: Vec::new(),
-            dirs: vec![dirs::home_dir().unwrap()],
+            dirs,
             ignore_hidden: false,
         }
     }
@@ -194,4 +216,46 @@ impl Default for UIConfigWindows {
 pub enum ModeFormatWindows {
     Traditional,
     PowerShell,
+}
+
+const DEFAULT_CONFIG: &str = include_str!("../../../config/default.toml");
+
+const CONFIG_LOCATION_ERROR_MSG: &str = "Could not determine the location of config file. \
+    Please provide the location of config file with -C/--config option.";
+
+pub fn read_or_create_config<P>(config_path: Option<P>) -> Result<Config>
+where
+    P: AsRef<Path>,
+{
+    let path = if let Some(path) = config_path.as_ref() {
+        Cow::Borrowed(path.as_ref())
+    } else if cfg!(windows) {
+        let config_dir = dirs::config_dir().ok_or_else(|| anyhow!(CONFIG_LOCATION_ERROR_MSG))?;
+        let mut path = config_dir;
+        path.push(env!("CARGO_PKG_NAME"));
+        path.push("config.toml");
+        Cow::Owned(path)
+    } else {
+        let home_dir = dirs::home_dir().ok_or_else(|| anyhow!(CONFIG_LOCATION_ERROR_MSG))?;
+        let mut path = home_dir;
+        path.push(".config");
+        path.push(env!("CARGO_PKG_NAME"));
+        path.push("config.toml");
+        Cow::Owned(path)
+    };
+
+    if let Ok(config_string) = fs::read_to_string(&path) {
+        Ok(toml::from_str(config_string.as_str())
+            .context("Invalid config file. Please edit the config file and try again.")?)
+    } else {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut writer = BufWriter::new(File::create(path)?);
+        writer.write_all(DEFAULT_CONFIG.as_bytes())?;
+        writer.flush()?;
+
+        Ok(toml::from_str(DEFAULT_CONFIG)?)
+    }
 }

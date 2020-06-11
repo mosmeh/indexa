@@ -5,10 +5,8 @@ auto_match_path = true
 location = "database"
 index = [
     "size",
+    "mode",
     "modified"
-]
-dirs = [
-    "/"
 ]
 
 [ui]
@@ -19,6 +17,10 @@ datetime_format = "%Y/%m/%d %T"
 
 [[ui.columns]]
 kind = "basename"
+
+[[ui.columns]]
+kind = "mode"
+width = 8
 
 [[ui.columns]]
 kind = "size"

@@ -2,13 +2,15 @@ mod config;
 mod tui;
 mod worker;
 
+use config::IndexKind;
+
 use indexa::database::DatabaseBuilder;
 
-use anyhow::Result;
-use config::{Config, IndexKind};
+use anyhow::{anyhow, Result};
 use rayon::ThreadPoolBuilder;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -45,22 +47,38 @@ pub struct Opt {
     /// Defaults to the number of available CPUs - 1.
     #[structopt(short, long)]
     threads: Option<usize>,
+
+    /// Location of the config file.
+    #[structopt(short = "C", long)]
+    config: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
-    let mut config: Config = toml::from_str(&fs::read_to_string("config.toml")?)?;
+    let mut config = config::read_or_create_config(opt.config.as_ref())?;
     config.flags.merge_opt(&opt);
+
+    let db_location = if let Some(location) = &config.database.location {
+        location
+    } else {
+        return Err(anyhow!(
+            "Could not determine the location of database file. Please edit the config file."
+        ));
+    };
 
     ThreadPoolBuilder::new()
         .num_threads(config.flags.threads)
         .build_global()?;
 
-    if opt.update || !config.database.location.exists() {
-        if config.database.location.exists() {
+    if opt.update || !db_location.exists() {
+        if db_location.exists() {
             println!("Updating database");
         } else {
             println!("Creating database");
+
+            if let Some(parent) = db_location.parent() {
+                fs::create_dir_all(parent)?;
+            }
         }
 
         let mut db_builder = DatabaseBuilder::new();
@@ -83,7 +101,7 @@ fn main() -> Result<()> {
             .ignore_hidden(config.database.ignore_hidden)
             .build()?;
 
-        let mut writer = BufWriter::new(File::create(&config.database.location)?);
+        let mut writer = BufWriter::new(File::create(&db_location)?);
         bincode::serialize_into(&mut writer, &database)?;
         writer.flush()?;
     }

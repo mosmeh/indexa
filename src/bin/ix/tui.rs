@@ -75,7 +75,7 @@ impl<'a> TuiApp<'a> {
 
     fn run(&mut self) -> Result<()> {
         let (load_tx, load_rx) = channel::unbounded();
-        let db_path = self.config.database.location.clone();
+        let db_path = self.config.database.location.as_ref().unwrap().clone();
         let loader = Loader::run(db_path, load_tx)?;
 
         let mut terminal = setup_terminal()?;
