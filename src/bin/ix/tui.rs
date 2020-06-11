@@ -110,7 +110,7 @@ impl<'a> TuiApp<'a> {
             let searcher = Searcher::run(self.config, database, matcher_rx, result_tx)?;
 
             self.matcher_tx = Some(matcher_tx);
-            self.on_pattern_change()?;
+            self.on_query_change()?;
 
             loop {
                 let terminal_width = terminal.size()?.width;
@@ -358,12 +358,12 @@ impl<'a> TuiApp<'a> {
             (_, KeyCode::Enter) => return Ok(State::Accepted),
             (_, KeyCode::Backspace) | (KeyModifiers::CONTROL, KeyCode::Char('h')) => {
                 if self.text_box_state.on_backspace() {
-                    self.on_pattern_change()?;
+                    self.on_query_change()?;
                 }
             }
             (_, KeyCode::Delete) | (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
                 if self.text_box_state.on_delete() {
-                    self.on_pattern_change()?;
+                    self.on_query_change()?;
                 }
             }
             (_, KeyCode::Left) | (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
@@ -380,7 +380,7 @@ impl<'a> TuiApp<'a> {
             }
             (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
                 self.text_box_state.clear();
-                self.on_pattern_change()?;
+                self.on_query_change()?;
             }
             (_, KeyCode::Up)
             | (KeyModifiers::CONTROL, KeyCode::Char('p'))
@@ -392,7 +392,7 @@ impl<'a> TuiApp<'a> {
             (_, KeyCode::PageDown) => self.on_pagedown()?,
             (_, KeyCode::Char(c)) => {
                 self.text_box_state.on_char(c);
-                self.on_pattern_change()?;
+                self.on_query_change()?;
             }
             _ => (),
         }
@@ -477,18 +477,18 @@ impl<'a> TuiApp<'a> {
         Ok(())
     }
 
-    fn on_pattern_change(&mut self) -> Result<()> {
+    fn on_query_change(&mut self) -> Result<()> {
         if self.database.is_none() {
             return Ok(());
         }
 
-        let pattern = self.text_box_state.text();
-        if pattern.is_empty() {
+        let query = self.text_box_state.text();
+        if query.is_empty() {
             self.hits.clear();
         } else {
-            let matcher = MatcherBuilder::new(pattern)
-                .in_path(self.config.flags.in_path)
-                .auto_in_path(self.config.flags.auto_in_path)
+            let matcher = MatcherBuilder::new(query)
+                .match_path(self.config.flags.match_path)
+                .auto_match_path(self.config.flags.auto_match_path)
                 .case_insensitive(!self.config.flags.case_sensitive)
                 .regex(self.config.flags.regex)
                 .build();

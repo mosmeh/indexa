@@ -26,11 +26,11 @@ pub struct Opt {
 
     /// Search in path.
     #[structopt(short = "p", long)]
-    in_path: bool,
+    match_path: bool,
 
-    /// Search in path when pattern contains path separators.
+    /// Search in path when query contains path separators.
     #[structopt(long)]
-    auto_in_path: bool,
+    auto_match_path: bool,
 
     /// Enable regex.
     #[structopt(short, long)]

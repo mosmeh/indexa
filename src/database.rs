@@ -91,13 +91,13 @@ impl<'a> Database {
     }
 
     fn node_matches(&self, node: &EntryNode, matcher: &Matcher) -> bool {
-        if matcher.in_path {
+        if matcher.match_path {
             if let Some(path) = self.path_from_node(node).to_str() {
-                if matcher.pattern.is_match(path) {
+                if matcher.query.is_match(path) {
                     return true;
                 }
             }
-        } else if matcher.pattern.is_match(&node.name) {
+        } else if matcher.query.is_match(&node.name) {
             return true;
         }
         false

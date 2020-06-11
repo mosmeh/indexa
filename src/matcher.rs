@@ -6,27 +6,27 @@ use std::ops::Range;
 
 #[derive(Clone)]
 pub struct Matcher {
-    pub(crate) pattern: Regex,
-    pub(crate) in_path: bool,
+    pub(crate) query: Regex,
+    pub(crate) match_path: bool,
 }
 
 impl Matcher {
     pub fn is_match(&self, entry: &Entry) -> bool {
-        if self.in_path {
+        if self.match_path {
             entry
                 .path()
                 .to_str()
-                .map(|s| self.pattern.is_match(s))
+                .map(|s| self.query.is_match(s))
                 .unwrap_or(false)
         } else {
-            self.pattern.is_match(entry.basename())
+            self.query.is_match(entry.basename())
         }
     }
 
     pub fn match_detail<'a, 'b>(&'a self, entry: &'b Entry) -> Result<MatchDetail<'a, 'b>> {
         Ok(MatchDetail {
-            pattern: &self.pattern,
-            in_path: self.in_path,
+            query: &self.query,
+            match_path: self.match_path,
             basename: entry.basename(),
             path_str: entry.path().to_str().ok_or(Error::Utf8)?.to_string(),
         })
@@ -34,34 +34,34 @@ impl Matcher {
 }
 
 pub struct MatcherBuilder<'a> {
-    pattern_str: Cow<'a, str>,
-    in_path: bool,
-    auto_in_path: bool,
+    query_str: Cow<'a, str>,
+    match_path: bool,
+    auto_match_path: bool,
     case_insensitive: bool,
     regex: bool,
 }
 
 impl<'a> MatcherBuilder<'a> {
-    pub fn new<P>(pattern_str: P) -> Self
+    pub fn new<P>(query_str: P) -> Self
     where
         P: Into<Cow<'a, str>>,
     {
         Self {
-            pattern_str: pattern_str.into(),
-            in_path: false,
-            auto_in_path: false,
+            query_str: query_str.into(),
+            match_path: false,
+            auto_match_path: false,
             case_insensitive: false,
             regex: false,
         }
     }
 
-    pub fn in_path(&mut self, yes: bool) -> &mut Self {
-        self.in_path = yes;
+    pub fn match_path(&mut self, yes: bool) -> &mut Self {
+        self.match_path = yes;
         self
     }
 
-    pub fn auto_in_path(&mut self, yes: bool) -> &mut Self {
-        self.auto_in_path = yes;
+    pub fn auto_match_path(&mut self, yes: bool) -> &mut Self {
+        self.auto_match_path = yes;
         self
     }
 
@@ -77,28 +77,28 @@ impl<'a> MatcherBuilder<'a> {
 
     pub fn build(&self) -> Result<Matcher> {
         let regex = if self.regex {
-            RegexBuilder::new(&self.pattern_str)
+            RegexBuilder::new(&self.query_str)
         } else {
-            RegexBuilder::new(&regex::escape(&self.pattern_str))
+            RegexBuilder::new(&regex::escape(&self.query_str))
         }
         .case_insensitive(self.case_insensitive)
         .build()?;
 
         Ok(Matcher {
-            pattern: regex,
-            in_path: should_search_in_path(
-                self.in_path,
-                self.auto_in_path,
+            query: regex,
+            match_path: should_search_match_path(
+                self.match_path,
+                self.auto_match_path,
                 self.regex,
-                &self.pattern_str,
+                &self.query_str,
             ),
         })
     }
 }
 
 pub struct MatchDetail<'a, 'b> {
-    pattern: &'a Regex,
-    in_path: bool,
+    query: &'a Regex,
+    match_path: bool,
     basename: &'b str,
     path_str: String,
 }
@@ -109,8 +109,8 @@ impl MatchDetail<'_, '_> {
     }
 
     pub fn basename_matches(&self) -> Vec<Range<usize>> {
-        if self.in_path {
-            self.pattern
+        if self.match_path {
+            self.query
                 .find_iter(&self.path_str)
                 .filter_map(|m| {
                     if self.path_str.len() - m.end() < self.basename.len() {
@@ -127,7 +127,7 @@ impl MatchDetail<'_, '_> {
                 })
                 .collect()
         } else {
-            self.pattern
+            self.query
                 .find_iter(self.basename)
                 .map(|m| m.range())
                 .collect()
@@ -135,13 +135,13 @@ impl MatchDetail<'_, '_> {
     }
 
     pub fn path_matches(&self) -> Vec<Range<usize>> {
-        if self.in_path {
-            self.pattern
+        if self.match_path {
+            self.query
                 .find_iter(&self.path_str)
                 .map(|m| m.range())
                 .collect()
         } else {
-            self.pattern
+            self.query
                 .find_iter(self.basename)
                 .map(|m| Range {
                     start: self.path_str.len() - self.basename.len() + m.start(),
@@ -152,8 +152,13 @@ impl MatchDetail<'_, '_> {
     }
 }
 
-fn should_search_in_path(in_path: bool, auto_inpath: bool, regex: bool, pattern_str: &str) -> bool {
-    if in_path {
+fn should_search_match_path(
+    match_path: bool,
+    auto_inpath: bool,
+    regex: bool,
+    query_str: &str,
+) -> bool {
+    if match_path {
         return true;
     }
     if !auto_inpath {
@@ -161,8 +166,8 @@ fn should_search_in_path(in_path: bool, auto_inpath: bool, regex: bool, pattern_
     }
 
     if regex && std::path::MAIN_SEPARATOR == '\\' {
-        return pattern_str.contains("\\\\");
+        return query_str.contains("\\\\");
     }
 
-    pattern_str.contains(std::path::MAIN_SEPARATOR)
+    query_str.contains(std::path::MAIN_SEPARATOR)
 }
