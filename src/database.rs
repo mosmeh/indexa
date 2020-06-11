@@ -5,8 +5,8 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs::{DirEntry, FileType, Metadata};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -103,22 +103,6 @@ impl<'a> Database {
         false
     }
 
-    fn push_file(&mut self, precursor: EntryPrecursor, parent: usize) {
-        self.files.push(EntryNode {
-            name: precursor.name,
-            parent,
-        });
-        self.file_statuses.push(&precursor.status);
-    }
-
-    fn push_dir(&mut self, precursor: EntryPrecursor, parent: usize) {
-        self.dirs.push(EntryNode {
-            name: precursor.name,
-            parent,
-        });
-        self.dir_statuses.push(&precursor.status);
-    }
-
     fn path_from_node(&self, node: &EntryNode) -> PathBuf {
         let mut buf = PathBuf::new();
         self.path_from_node_impl(node.parent, &mut buf);
@@ -200,7 +184,7 @@ impl DatabaseBuilder {
     }
 
     pub fn build(&self) -> Result<Database> {
-        let database = Database {
+        let mut database = Database {
             files: Vec::new(),
             dirs: Vec::new(),
             file_statuses: EntryStatusVec::new(&self.index_flags),
@@ -209,8 +193,6 @@ impl DatabaseBuilder {
                 ..self.index_flags
             }),
         };
-
-        let database = Arc::new(Mutex::new(database));
 
         let mut dirs = self
             .dirs
@@ -239,24 +221,33 @@ impl DatabaseBuilder {
             }
 
             let root_node_id = {
-                let mut db = database.lock().unwrap();
-
-                let root_node_id = db.dirs.len();
+                let root_node_id = database.dirs.len();
                 let root_node = EntryNode {
                     name: (*path_str).clone(),
                     parent: root_node_id, // points to itself
                 };
-                db.dirs.push(root_node);
-                db.dir_statuses.push(&root_precursor.status);
+                database.dirs.push(root_node);
+                database.dir_statuses.push(&root_precursor.status);
 
                 root_node_id
             };
 
-            walk_file_system(database.clone(), &self.index_flags, &path, root_node_id);
+            let counter = Arc::new(AtomicUsize::new(database.dirs.len()));
+            let (f, mut d) =
+                walk_file_system(counter.clone(), &self.index_flags, &path, root_node_id).unwrap();
+            for (f, fs) in f {
+                database.files.push(f);
+                database.file_statuses.push(&fs);
+            }
+            d.sort_by_key(|(iz, _, _)| *iz);
+            for (iz, d, ds) in d {
+                assert_eq!(database.dirs.len(), iz);
+                database.dirs.push(d);
+                database.dir_statuses.push(&ds);
+            }
         }
 
-        // safe to unwrap since above codes are the only users of database at the moment
-        Ok(Arc::try_unwrap(database).unwrap().into_inner().unwrap())
+        Ok(database)
     }
 }
 
@@ -511,11 +502,14 @@ impl EntryPrecursor {
 }
 
 fn walk_file_system(
-    database: Arc<Mutex<Database>>,
+    counter: Arc<AtomicUsize>,
     index_flags: &IndexFlags,
     path: &Path,
     parent: usize,
-) {
+) -> Option<(
+    Vec<(EntryNode, EntryStatus)>,
+    Vec<(usize, EntryNode, EntryStatus)>,
+)> {
     if let Ok(rd) = path.read_dir() {
         let children = rd
             .filter_map(|dent| {
@@ -531,23 +525,45 @@ fn walk_file_system(
             .collect::<Vec<_>>();
 
         let mut sub_directories = Vec::new();
-        {
-            let mut db = database.lock().unwrap();
-            for (path, precursor) in children {
-                if precursor.ftype.is_dir() {
-                    sub_directories.push((path, db.dirs.len()));
-                    db.push_dir(precursor, parent);
-                } else {
-                    db.push_file(precursor, parent);
-                }
+        let mut files = Vec::new();
+        let mut dirs = Vec::new();
+        for (path, precursor) in children {
+            if precursor.ftype.is_dir() {
+                let id = counter.fetch_add(1, Ordering::Relaxed);
+                sub_directories.push((path, id));
+                dirs.push((
+                    id,
+                    EntryNode {
+                        name: precursor.name,
+                        parent,
+                    },
+                    precursor.status,
+                ));
+            } else {
+                files.push((
+                    EntryNode {
+                        name: precursor.name,
+                        parent,
+                    },
+                    precursor.status,
+                ));
             }
         }
 
-        sub_directories
+        for (f, d) in sub_directories
             .par_iter()
-            .for_each_with(database, |database, (path, index)| {
-                walk_file_system(database.clone(), index_flags, path, *index);
-            });
+            .map_with(counter, |counter, (path, index)| {
+                walk_file_system(counter.clone(), index_flags, path, *index)
+            })
+            .filter_map(|x| x)
+            .collect::<Vec<_>>()
+        {
+            files.extend(f);
+            dirs.extend(d);
+        }
+        Some((files, dirs))
+    } else {
+        None
     }
 }
 
