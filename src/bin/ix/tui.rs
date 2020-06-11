@@ -148,6 +148,7 @@ impl<'a> TuiApp<'a> {
                 Constraint::Min(1),
                 Constraint::Length(1),
                 Constraint::Length(1),
+                Constraint::Length(1),
             ])
             .split(f.size());
 
@@ -169,6 +170,24 @@ impl<'a> TuiApp<'a> {
         let paragraph = Paragraph::new(text.iter());
         f.render_widget(paragraph, chunks[1]);
 
+        // path of selected row
+        let text = vec![Text::raw(
+            self.hits
+                .get(self.table_state.selected())
+                .and_then(|id| {
+                    self.database
+                        .as_ref()
+                        .unwrap()
+                        .entry(id)
+                        .path()
+                        .to_str()
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_else(|| "".to_string()),
+        )];
+        let paragraph = Paragraph::new(text.iter());
+        f.render_widget(paragraph, chunks[2]);
+
         // input box
         let text_box = TextBox::new()
             .highlight_style(Style::default().fg(Color::Black).bg(Color::White))
@@ -176,7 +195,7 @@ impl<'a> TuiApp<'a> {
                 "> ",
                 Style::default().fg(Color::Blue).modifier(Modifier::BOLD),
             ));
-        f.render_stateful_widget(text_box, chunks[2], &mut self.text_box_state);
+        f.render_stateful_widget(text_box, chunks[3], &mut self.text_box_state);
     }
 
     fn draw_table(&mut self, f: &mut Frame<Backend>, area: Rect, terminal_width: u16) {
