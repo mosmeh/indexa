@@ -18,29 +18,25 @@ use unicode_width::UnicodeWidthStr;
 #[derive(Debug, Clone)]
 pub struct TableState {
     offset: usize,
-    selected: Option<usize>,
+    selected: usize,
 }
 
 impl Default for TableState {
     fn default() -> TableState {
         TableState {
             offset: 0,
-            selected: None,
+            selected: 0,
         }
     }
 }
 
 impl TableState {
-    #[allow(dead_code)]
-    pub fn selected(&self) -> Option<usize> {
+    pub fn selected(&self) -> usize {
         self.selected
     }
 
-    pub fn select(&mut self, index: Option<usize>) {
+    pub fn select(&mut self, index: usize) {
         self.selected = index;
-        if index.is_none() {
-            self.offset = 0;
-        }
     }
 }
 
@@ -87,6 +83,7 @@ pub struct Table<'a, H, R> {
     selected_highlight_style: Style,
     selected_symbol: Option<&'a str>,
     rows: R,
+    num_rows: Option<usize>,
 }
 
 impl<'a, H, R> Default for Table<'a, H, R>
@@ -109,6 +106,7 @@ where
             selected_highlight_style: Style::default(),
             selected_symbol: None,
             rows: R::default(),
+            num_rows: None,
         }
     }
 }
@@ -135,6 +133,7 @@ where
             selected_highlight_style: Style::default(),
             selected_symbol: None,
             rows,
+            num_rows: None,
         }
     }
 
@@ -183,6 +182,11 @@ where
         II: IntoIterator<Item = Row<M, D>, IntoIter = R>,
     {
         self.rows = rows.into_iter();
+        self
+    }
+
+    pub fn num_rows(mut self, num_rows: usize) -> Table<'a, H, R> {
+        self.num_rows = Some(num_rows);
         self
     }
 
@@ -337,21 +341,21 @@ where
         if y < table_area.bottom() {
             let remaining = (table_area.bottom() - y) as usize;
 
-            // Make sure the table shows the selected item
-            state.offset = if let Some(selected) = state.selected {
-                if selected >= remaining + state.offset - 1 {
-                    selected + 1 - remaining
-                } else if selected < state.offset {
-                    selected
-                } else {
-                    state.offset
-                }
+            if let Some(num_rows) = self.num_rows {
+                state.offset = state.offset.min(num_rows.saturating_sub(remaining));
+            }
+
+            state.offset = if state.selected >= remaining + state.offset - 1 {
+                state.selected + 1 - remaining
+            } else if state.selected < state.offset {
+                state.selected
             } else {
-                0
+                state.offset
             };
+
             for (i, row) in self.rows.skip(state.offset).take(remaining).enumerate() {
                 let (style, highlight_style, symbol) = {
-                    if Some(i) == state.selected.map(|s| s - state.offset) {
+                    if i == state.selected - state.offset {
                         (
                             self.selected_style,
                             self.selected_highlight_style,

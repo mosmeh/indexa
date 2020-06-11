@@ -47,13 +47,13 @@ enum State {
 struct TuiApp<'a> {
     config: &'a Config,
     database: Option<Arc<Database>>,
-    text_box_state: TextBoxState,
     matcher: Option<Matcher>,
     hits: Vec<EntryId>,
-    selected: usize,
     search_in_progress: bool,
-    page_shift_amount: u16,
     matcher_tx: Option<Sender<Matcher>>,
+    text_box_state: TextBoxState,
+    table_state: TableState,
+    page_shift_amount: u16,
 }
 
 impl<'a> TuiApp<'a> {
@@ -61,14 +61,15 @@ impl<'a> TuiApp<'a> {
         let app = Self {
             config,
             database: None,
-            text_box_state: Default::default(),
             matcher: None,
             hits: Vec::new(),
-            selected: 0,
             search_in_progress: false,
-            page_shift_amount: 0,
             matcher_tx: None,
+            text_box_state: Default::default(),
+            table_state: Default::default(),
+            page_shift_amount: 0,
         };
+
         Ok(app)
     }
 
@@ -229,6 +230,7 @@ impl<'a> TuiApp<'a> {
             .collect::<Vec<_>>();
 
         let table = Table::new(header, items)
+            .num_rows(self.hits.len())
             .widths(&widths)
             .alignments(&alignments)
             .selected_style(Style::default().fg(Color::Blue))
@@ -237,10 +239,9 @@ impl<'a> TuiApp<'a> {
             .selected_symbol("> ")
             .header_gap(1);
 
-        let mut table_state = TableState::default();
-        table_state.select(Some(self.selected));
-
+        let mut table_state = self.table_state.clone();
         f.render_stateful_widget(table, area, &mut table_state);
+        self.table_state = table_state;
 
         self.page_shift_amount = area.height.saturating_sub(
             // header
@@ -393,7 +394,8 @@ impl<'a> TuiApp<'a> {
         self.search_in_progress = false;
 
         if !self.hits.is_empty() {
-            self.selected = self.selected.min(self.hits.len() - 1);
+            self.table_state
+                .select(self.table_state.selected().min(self.hits.len() - 1));
         }
 
         Ok(())
@@ -401,7 +403,8 @@ impl<'a> TuiApp<'a> {
 
     fn on_up(&mut self) -> Result<()> {
         if !self.hits.is_empty() {
-            self.selected = self.selected.saturating_sub(1);
+            self.table_state
+                .select(self.table_state.selected().saturating_sub(1));
         }
 
         Ok(())
@@ -409,7 +412,8 @@ impl<'a> TuiApp<'a> {
 
     fn on_down(&mut self) -> Result<()> {
         if !self.hits.is_empty() {
-            self.selected = (self.selected + 1).min(self.hits.len() - 1);
+            self.table_state
+                .select((self.table_state.selected() + 1).min(self.hits.len() - 1));
         }
 
         Ok(())
@@ -417,9 +421,11 @@ impl<'a> TuiApp<'a> {
 
     fn on_pageup(&mut self) -> Result<()> {
         if !self.hits.is_empty() {
-            self.selected = self
-                .selected
-                .saturating_sub(self.page_shift_amount as usize);
+            self.table_state.select(
+                self.table_state
+                    .selected()
+                    .saturating_sub(self.page_shift_amount as usize),
+            );
         }
 
         Ok(())
@@ -427,15 +433,17 @@ impl<'a> TuiApp<'a> {
 
     fn on_pagedown(&mut self) -> Result<()> {
         if !self.hits.is_empty() {
-            self.selected =
-                (self.selected + self.page_shift_amount as usize).min(self.hits.len() - 1);
+            self.table_state.select(
+                (self.table_state.selected() + self.page_shift_amount as usize)
+                    .min(self.hits.len() - 1),
+            );
         }
 
         Ok(())
     }
 
     fn on_accept(&self) -> Result<()> {
-        if let Some(id) = self.hits.get(self.selected) {
+        if let Some(id) = self.hits.get(self.table_state.selected()) {
             println!(
                 "{}",
                 self.database
