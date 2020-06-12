@@ -1,4 +1,4 @@
-use crate::config::{ColumnKind, Config, SortOrder};
+use crate::config::{Config, SortOrder, StatusKind};
 
 use indexa::database::{Database, Entry, EntryId};
 use indexa::matcher::Matcher;
@@ -84,7 +84,7 @@ impl Searcher {
 }
 
 struct SearcherImpl {
-    sort_by: ColumnKind,
+    sort_by: StatusKind,
     sort_order: SortOrder,
     dirs_before_files: bool,
     database: Arc<Database>,
@@ -198,23 +198,27 @@ where
 }
 
 fn build_compare_func(
-    sort_by: &ColumnKind,
+    sort_by: &StatusKind,
     sort_order: &SortOrder,
     dirs_before_files: bool,
 ) -> Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> {
     let cmp_status: Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> = match sort_by {
-        ColumnKind::Basename => Box::new(move |a, b| a.basename().cmp(b.basename())),
-        ColumnKind::FullPath => Box::new(move |a, b| a.path().cmp(&b.path())),
-        ColumnKind::Extension => Box::new(move |a, b| a.extension().cmp(&b.extension())),
-        ColumnKind::Size => Box::new(move |a, b| {
+        StatusKind::Basename => {
+            Box::new(move |a, b| a.basename_sort_key().cmp(&b.basename_sort_key()))
+        }
+        StatusKind::FullPath => Box::new(move |a, b| a.path_sort_key().cmp(&b.path_sort_key())),
+        StatusKind::Extension => {
+            Box::new(move |a, b| a.extension_sort_key().cmp(&b.extension_sort_key()))
+        }
+        StatusKind::Size => Box::new(move |a, b| {
             b.is_dir()
                 .cmp(&a.is_dir())
                 .then_with(|| a.size().cmp(&b.size()))
         }),
-        ColumnKind::Mode => Box::new(move |a, b| a.mode().cmp(&b.mode())),
-        ColumnKind::Created => Box::new(move |a, b| a.created().cmp(&b.created())),
-        ColumnKind::Modified => Box::new(move |a, b| a.modified().cmp(&b.modified())),
-        ColumnKind::Accessed => Box::new(move |a, b| a.accessed().cmp(&b.accessed())),
+        StatusKind::Mode => Box::new(move |a, b| a.mode().cmp(&b.mode())),
+        StatusKind::Created => Box::new(move |a, b| a.created().cmp(&b.created())),
+        StatusKind::Modified => Box::new(move |a, b| a.modified().cmp(&b.modified())),
+        StatusKind::Accessed => Box::new(move |a, b| a.accessed().cmp(&b.accessed())),
     };
 
     let cmp_file_dir: Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> =

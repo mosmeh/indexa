@@ -1,7 +1,7 @@
 mod table;
 mod text_box;
 
-use crate::config::{ColumnKind, Config};
+use crate::config::{Config, StatusKind};
 use crate::worker::{Loader, Searcher};
 
 use table::{HighlightableText, Row, Table, TableState};
@@ -11,7 +11,7 @@ use indexa::database::{Database, Entry, EntryId};
 use indexa::matcher::{MatchDetail, Matcher, MatcherBuilder};
 use indexa::mode::Mode;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::offset::Local;
 use chrono::DateTime;
 use crossbeam::channel::{self, Sender};
@@ -59,6 +59,10 @@ struct TuiApp<'a> {
 
 impl<'a> TuiApp<'a> {
     fn new(config: &'a Config) -> Result<Self> {
+        if !config.database.index.contains(&config.ui.sort_by) {
+            return Err(anyhow!("File/directory status to sort by must be indexed"));
+        }
+
         let app = Self {
             config,
             database: None,
@@ -201,7 +205,7 @@ impl<'a> TuiApp<'a> {
     fn draw_table(&mut self, f: &mut Frame<Backend>, area: Rect, terminal_width: u16) {
         let columns = &self.config.ui.columns;
 
-        let header = columns.iter().map(|column| format!("{}", column.kind));
+        let header = columns.iter().map(|column| format!("{}", column.status));
 
         let items = self.hits.iter().map(|id| {
             let entry = self.database.as_ref().unwrap().entry(id);
@@ -209,7 +213,7 @@ impl<'a> TuiApp<'a> {
             let contents = columns
                 .iter()
                 .map(|column| {
-                    self.display_column_content(&column.kind, &entry, &match_detail)
+                    self.display_column_content(&column.status, &entry, &match_detail)
                         .unwrap_or_else(|| HighlightableText::Raw("".to_string()))
                 })
                 .collect::<Vec<_>>();
@@ -242,8 +246,8 @@ impl<'a> TuiApp<'a> {
 
         let alignments = columns
             .iter()
-            .map(|column| match column.kind {
-                ColumnKind::Size => Alignment::Right,
+            .map(|column| match column.status {
+                StatusKind::Size => Alignment::Right,
                 _ => Alignment::Left,
             })
             .collect::<Vec<_>>();
@@ -274,34 +278,34 @@ impl<'a> TuiApp<'a> {
 
     fn display_column_content(
         &self,
-        kind: &ColumnKind,
+        kind: &StatusKind,
         entry: &Entry,
         match_detail: &MatchDetail,
     ) -> Option<HighlightableText<impl Iterator<Item = Range<usize>>>> {
         match kind {
-            ColumnKind::Basename => Some(HighlightableText::Highlighted(
+            StatusKind::Basename => Some(HighlightableText::Highlighted(
                 entry.basename().to_string(),
                 match_detail.basename_matches().into_iter(),
             )),
 
-            ColumnKind::FullPath => Some(HighlightableText::Highlighted(
+            StatusKind::FullPath => Some(HighlightableText::Highlighted(
                 match_detail.path_str().to_string(),
                 match_detail.path_matches().into_iter(),
             )),
-            ColumnKind::Extension => entry
+            StatusKind::Extension => entry
                 .extension()
                 .map(|s| HighlightableText::Raw(s.to_string())),
-            ColumnKind::Size => self
+            StatusKind::Size => self
                 .display_size(entry.size(), entry.is_dir())
                 .map(HighlightableText::Raw),
-            ColumnKind::Mode => self.display_mode(entry.mode()).map(HighlightableText::Raw),
-            ColumnKind::Created => self
+            StatusKind::Mode => self.display_mode(entry.mode()).map(HighlightableText::Raw),
+            StatusKind::Created => self
                 .display_datetime(entry.created())
                 .map(HighlightableText::Raw),
-            ColumnKind::Modified => self
+            StatusKind::Modified => self
                 .display_datetime(entry.modified())
                 .map(HighlightableText::Raw),
-            ColumnKind::Accessed => self
+            StatusKind::Accessed => self
                 .display_datetime(entry.accessed())
                 .map(HighlightableText::Raw),
         }

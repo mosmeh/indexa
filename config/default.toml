@@ -17,11 +17,11 @@
 # Location of database file. Defaults to {the user's data directory}/indexa/database.db
 # location = "/path/to/database/database.db"
 
-# File/directory statuses to index. [size, mode, created, modified, accessed]
-index = [
-    "size",
-    "modified"
-]
+# File/directory statuses to index. [basename, path, extension, size, mode, created, modified, accessed]
+# basename is implicitly specified.
+# index = [
+#     "path"
+# ]
 
 # Root directories to index.
 # dirs = [
@@ -32,11 +32,14 @@ index = [
 ignore_hidden = false
 
 [ui]
-# Column to sort by. [basename, path, extension, size, mode, created, modified, accessed]
+# File/directory statuses to sort by. The status has to be indexed.
 sort_by = "basename"
 
 # Sort order. [ascending, descending]
 sort_order = "ascending"
+
+# Whether to sort directories before files.
+dirs_before_files = false
 
 # Whether to show size in human readable format.
 human_readable_size = true
@@ -45,22 +48,21 @@ human_readable_size = true
 datetime_format = "%Y/%m/%d %T"
 
 # Columns from left to right.
-# kind is one of: [basename, path, extension, size, mode, created, modified, accessed]
 # Columns with width specified will have fixed widths.
 # Remaining screen width is evenly distributed among other columns.
 [[ui.columns]]
-kind = "basename"
+status = "basename"
 
 [[ui.columns]]
-kind = "size"
+status = "size"
 width = 9
 
 [[ui.columns]]
-kind = "modified"
+status = "modified"
 width = 20
 
 [[ui.columns]]
-kind = "path"
+status = "path"
 
 [ui.unix]
 # Format of mode column. [octal, symbolic]

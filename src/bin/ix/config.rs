@@ -54,7 +54,7 @@ impl FlagConfig {
 #[serde(default)]
 pub struct DatabaseConfig {
     pub location: Option<PathBuf>,
-    pub index: Vec<IndexKind>,
+    pub index: Vec<StatusKind>,
     pub dirs: Vec<PathBuf>,
     pub ignore_hidden: bool,
 }
@@ -89,19 +89,9 @@ impl Default for DatabaseConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum IndexKind {
-    Size,
-    Mode,
-    Created,
-    Modified,
-    Accessed,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UIConfig {
-    pub sort_by: ColumnKind,
+    pub sort_by: StatusKind,
     pub sort_order: SortOrder,
     pub dirs_before_files: bool,
     pub human_readable_size: bool,
@@ -115,18 +105,18 @@ pub struct UIConfig {
 impl Default for UIConfig {
     fn default() -> Self {
         Self {
-            sort_by: ColumnKind::Basename,
+            sort_by: StatusKind::Basename,
             sort_order: SortOrder::Ascending,
             dirs_before_files: false,
             human_readable_size: false,
             datetime_format: "%Y/%m/%d %T".to_string(),
             columns: vec![
                 Column {
-                    kind: ColumnKind::Basename,
+                    status: StatusKind::Basename,
                     width: None,
                 },
                 Column {
-                    kind: ColumnKind::FullPath,
+                    status: StatusKind::FullPath,
                     width: None,
                 },
             ],
@@ -134,48 +124,6 @@ impl Default for UIConfig {
             windows: Default::default(),
         }
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Column {
-    pub kind: ColumnKind,
-    pub width: Option<u16>,
-}
-
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ColumnKind {
-    Basename,
-    #[serde(rename = "path")]
-    FullPath,
-    Extension,
-    Size,
-    Mode,
-    Created,
-    Modified,
-    Accessed,
-}
-
-impl fmt::Display for ColumnKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ColumnKind::FullPath => f.write_str("Path"),
-            ColumnKind::Basename => f.write_str("Basename"),
-            ColumnKind::Size => f.write_str("Size"),
-            ColumnKind::Mode => f.write_str("Mode"),
-            ColumnKind::Extension => f.write_str("Extension"),
-            ColumnKind::Created => f.write_str("Created"),
-            ColumnKind::Modified => f.write_str("Modified"),
-            ColumnKind::Accessed => f.write_str("Accessed"),
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SortOrder {
-    Ascending,
-    Descending,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -193,13 +141,6 @@ impl Default for UIConfigUnix {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ModeFormatUnix {
-    Octal,
-    Symbolic,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UIConfigWindows {
     pub mode_format: ModeFormatWindows,
@@ -211,6 +152,55 @@ impl Default for UIConfigWindows {
             mode_format: ModeFormatWindows::Traditional,
         }
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusKind {
+    Basename,
+    #[serde(rename = "path")]
+    FullPath,
+    Extension,
+    Size,
+    Mode,
+    Created,
+    Modified,
+    Accessed,
+}
+
+impl fmt::Display for StatusKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StatusKind::FullPath => f.write_str("Path"),
+            StatusKind::Basename => f.write_str("Basename"),
+            StatusKind::Size => f.write_str("Size"),
+            StatusKind::Mode => f.write_str("Mode"),
+            StatusKind::Extension => f.write_str("Extension"),
+            StatusKind::Created => f.write_str("Created"),
+            StatusKind::Modified => f.write_str("Modified"),
+            StatusKind::Accessed => f.write_str("Accessed"),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Column {
+    pub status: StatusKind,
+    pub width: Option<u16>,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortOrder {
+    Ascending,
+    Descending,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModeFormatUnix {
+    Octal,
+    Symbolic,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -16,22 +16,22 @@ human_readable_size = true
 datetime_format = "%Y/%m/%d %T"
 
 [[ui.columns]]
-kind = "basename"
+status = "basename"
 
 [[ui.columns]]
-kind = "mode"
+status = "mode"
 width = 8
 
 [[ui.columns]]
-kind = "size"
+status = "size"
 width = 9
 
 [[ui.columns]]
-kind = "modified"
+status = "modified"
 width = 20
 
 [[ui.columns]]
-kind = "path"
+status = "path"
 
 [ui.unix]
 mode_format = "symbolic"

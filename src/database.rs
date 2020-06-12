@@ -20,6 +20,9 @@ pub struct Database {
     created: Option<Vec<SystemTime>>,
     modified: Option<Vec<SystemTime>>,
     accessed: Option<Vec<SystemTime>>,
+    basename_sort_key: Option<Vec<u32>>,
+    path_sort_key: Option<Vec<u32>>,
+    extension_sort_key: Option<Vec<u32>>,
 }
 
 impl Database {
@@ -119,11 +122,30 @@ impl Database {
         }
         buf.push(&dir.name);
     }
+
+    fn path_vec_from_node<'a>(&'a self, node: &'a EntryNode) -> Vec<&'a str> {
+        let mut buf = Vec::new();
+        self.path_vec_from_node_impl(node.parent, &mut buf);
+        buf.push(&node.name);
+        buf
+    }
+
+    fn path_vec_from_node_impl<'a>(&'a self, index: u32, mut buf: &mut Vec<&'a str>) {
+        let dir = &self.entries[index as usize];
+        if dir.parent == index {
+            // root node
+            buf.push(&self.entries[dir.parent as usize].name);
+        } else {
+            self.path_vec_from_node_impl(dir.parent, &mut buf);
+        }
+        buf.push(&dir.name);
+    }
 }
 
 pub struct DatabaseBuilder {
     dirs: Vec<PathBuf>,
     index_flags: IndexFlags,
+    fast_sort_flags: FastSortFlags,
 }
 
 impl Default for DatabaseBuilder {
@@ -138,6 +160,11 @@ impl Default for DatabaseBuilder {
                 accessed: false,
                 ignore_hidden: false,
             },
+            fast_sort_flags: FastSortFlags {
+                basename: true,
+                path: false,
+                extension: false,
+            },
         }
     }
 }
@@ -149,6 +176,21 @@ impl DatabaseBuilder {
 
     pub fn add_dir<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
         self.dirs.push(path.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn basename(&mut self, yes: bool) -> &mut Self {
+        self.fast_sort_flags.basename = yes;
+        self
+    }
+
+    pub fn path(&mut self, yes: bool) -> &mut Self {
+        self.fast_sort_flags.path = yes;
+        self
+    }
+
+    pub fn extension(&mut self, yes: bool) -> &mut Self {
+        self.fast_sort_flags.extension = yes;
         self
     }
 
@@ -210,6 +252,9 @@ impl DatabaseBuilder {
             } else {
                 None
             },
+            basename_sort_key: None,
+            path_sort_key: None,
+            extension_sort_key: None,
         };
 
         let database = Arc::new(Mutex::new(database));
@@ -265,8 +310,45 @@ impl DatabaseBuilder {
         }
 
         // safe to unwrap since above codes are the only users of database at the moment
-        Ok(Arc::try_unwrap(database).unwrap().into_inner().unwrap())
+        let mut database = Arc::try_unwrap(database).unwrap().into_inner().unwrap();
+
+        if self.fast_sort_flags.basename {
+            database.basename_sort_key = Some(generate_sort_keys(&database, |a, b| {
+                a.basename().cmp(b.basename())
+            }));
+        }
+        if self.fast_sort_flags.path {
+            database.path_sort_key = Some(generate_sort_keys(&database, |a, b| {
+                a.path_vec().cmp(&b.path_vec())
+            }));
+        }
+        if self.fast_sort_flags.extension {
+            database.extension_sort_key = Some(generate_sort_keys(&database, |a, b| {
+                a.extension().cmp(&b.extension())
+            }));
+        }
+
+        Ok(database)
     }
+}
+
+fn generate_sort_keys<F>(database: &Database, compare_func: F) -> Vec<u32>
+where
+    F: Fn(&Entry, &Entry) -> std::cmp::Ordering + Send + Sync,
+{
+    let mut indices = (0..database.entries.len() as u32).collect::<Vec<_>>();
+    indices
+        .as_parallel_slice_mut()
+        .par_sort_unstable_by(|a, b| {
+            compare_func(&database.entry(&EntryId(*a)), &database.entry(&EntryId(*b)))
+        });
+
+    let mut sort_keys = vec![0; indices.len()];
+    for (i, x) in indices.iter().enumerate() {
+        sort_keys[*x as usize] = i as u32;
+    }
+
+    sort_keys
 }
 
 #[derive(Debug)]
@@ -286,8 +368,22 @@ impl<'a, 'b> Entry<'a, 'b> {
         &self.node().name
     }
 
+    pub fn basename_sort_key(&self) -> Option<u32> {
+        self.database
+            .basename_sort_key
+            .as_ref()
+            .map(|v| v[self.id.0 as usize])
+    }
+
     pub fn path(&self) -> PathBuf {
         self.database.path_from_node(&self.node())
+    }
+
+    pub fn path_sort_key(&self) -> Option<u32> {
+        self.database
+            .path_sort_key
+            .as_ref()
+            .map(|v| v[self.id.0 as usize])
     }
 
     pub fn extension(&self) -> Option<&str> {
@@ -302,6 +398,13 @@ impl<'a, 'b> Entry<'a, 'b> {
         } else {
             None
         }
+    }
+
+    pub fn extension_sort_key(&self) -> Option<u32> {
+        self.database
+            .extension_sort_key
+            .as_ref()
+            .map(|v| v[self.id.0 as usize])
     }
 
     pub fn size(&self) -> Option<u64> {
@@ -376,6 +479,10 @@ impl<'a, 'b> Entry<'a, 'b> {
             })
     }
 
+    fn path_vec(&'a self) -> Vec<&'a str> {
+        self.database.path_vec_from_node(&self.node())
+    }
+
     fn node(&self) -> &EntryNode {
         &self.database.entries[self.id.0 as usize]
     }
@@ -395,6 +502,12 @@ struct IndexFlags {
     modified: bool,
     accessed: bool,
     ignore_hidden: bool,
+}
+
+struct FastSortFlags {
+    basename: bool,
+    path: bool,
+    extension: bool,
 }
 
 struct EntryStatus {

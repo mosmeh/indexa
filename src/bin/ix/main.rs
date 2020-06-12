@@ -2,7 +2,7 @@ mod config;
 mod tui;
 mod worker;
 
-use config::IndexKind;
+use config::StatusKind;
 
 use indexa::database::DatabaseBuilder;
 
@@ -58,6 +58,9 @@ fn main() -> Result<()> {
     let mut config = config::read_or_create_config(opt.config.as_ref())?;
     config.flags.merge_opt(&opt);
 
+    // implicitly index basename
+    config.database.index.push(StatusKind::Basename);
+
     let db_location = if let Some(location) = &config.database.location {
         location
     } else {
@@ -89,11 +92,14 @@ fn main() -> Result<()> {
 
         for kind in &config.database.index {
             match kind {
-                IndexKind::Size => db_builder.size(true),
-                IndexKind::Created => db_builder.created(true),
-                IndexKind::Modified => db_builder.modified(true),
-                IndexKind::Accessed => db_builder.accessed(true),
-                IndexKind::Mode => db_builder.mode(true),
+                StatusKind::Basename => db_builder.basename(true),
+                StatusKind::FullPath => db_builder.path(true),
+                StatusKind::Extension => db_builder.extension(true),
+                StatusKind::Size => db_builder.size(true),
+                StatusKind::Created => db_builder.created(true),
+                StatusKind::Modified => db_builder.modified(true),
+                StatusKind::Accessed => db_builder.accessed(true),
+                StatusKind::Mode => db_builder.mode(true),
             };
         }
 
