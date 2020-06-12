@@ -3,7 +3,10 @@ use crate::mode::Mode;
 use crate::{Error, Result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fs::{DirEntry, FileType, Metadata};
+use std::io;
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -11,43 +14,31 @@ use std::time::SystemTime;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
-    files: Vec<EntryNode>,
-    dirs: Vec<EntryNode>,
-    file_statuses: EntryStatusVec,
-    dir_statuses: EntryStatusVec,
+    entries: Vec<EntryNode>,
+    size: Option<Vec<u64>>,
+    mode: Option<Vec<Mode>>,
+    created: Option<Vec<SystemTime>>,
+    modified: Option<Vec<SystemTime>>,
+    accessed: Option<Vec<SystemTime>>,
 }
 
-impl<'a> Database {
+impl Database {
     pub fn num_entries(&self) -> usize {
-        self.files.len() + self.dirs.len()
+        self.entries.len()
     }
 
     pub fn search(&self, matcher: &Matcher) -> Vec<EntryId> {
-        let match_file = |(i, node): (u32, &EntryNode)| {
-            if self.node_matches(node, matcher) {
-                Some(EntryId::File(i))
-            } else {
-                None
-            }
-        };
-        let match_dir = |(i, node): (u32, &EntryNode)| {
-            if self.node_matches(node, matcher) {
-                Some(EntryId::Directory(i))
-            } else {
-                None
-            }
-        };
-
-        let files = (0..self.files.len() as u32)
+        (0..self.entries.len() as u32)
             .into_par_iter()
-            .zip(self.files.par_iter())
-            .filter_map(match_file);
-        let dirs = (0..self.dirs.len() as u32)
-            .into_par_iter()
-            .zip(self.dirs.par_iter())
-            .filter_map(match_dir);
-
-        files.chain(dirs).collect()
+            .zip(self.entries.par_iter())
+            .filter_map(|(i, node): (u32, &EntryNode)| {
+                if self.node_matches(node, matcher) {
+                    Some(EntryId(i))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub fn abortable_search(
@@ -55,38 +46,22 @@ impl<'a> Database {
         matcher: &Matcher,
         aborted: Arc<AtomicBool>,
     ) -> Result<Vec<EntryId>> {
-        let match_file = |(i, node): (u32, &EntryNode)| {
-            if aborted.load(Ordering::Relaxed) {
-                Some(Err(Error::SearchAbort))
-            } else if self.node_matches(node, matcher) {
-                Some(Ok(EntryId::File(i)))
-            } else {
-                None
-            }
-        };
-        let match_dir = |(i, node): (u32, &EntryNode)| {
-            if aborted.load(Ordering::Relaxed) {
-                Some(Err(Error::SearchAbort))
-            } else if self.node_matches(node, matcher) {
-                Some(Ok(EntryId::Directory(i)))
-            } else {
-                None
-            }
-        };
-
-        let files = (0..self.files.len() as u32)
+        (0..self.entries.len() as u32)
             .into_par_iter()
-            .zip(self.files.par_iter())
-            .filter_map(match_file);
-        let dirs = (0..self.dirs.len() as u32)
-            .into_par_iter()
-            .zip(self.dirs.par_iter())
-            .filter_map(match_dir);
-
-        files.chain(dirs).collect()
+            .zip(self.entries.par_iter())
+            .filter_map(|(i, node): (u32, &EntryNode)| {
+                if aborted.load(Ordering::Relaxed) {
+                    Some(Err(Error::SearchAbort))
+                } else if self.node_matches(node, matcher) {
+                    Some(Ok(EntryId(i)))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
-    pub fn entry<'b>(&'a self, id: &'b EntryId) -> Entry<'a, 'b> {
+    pub fn entry<'a, 'b>(&'a self, id: &'b EntryId) -> Entry<'a, 'b> {
         Entry { database: self, id }
     }
 
@@ -103,20 +78,28 @@ impl<'a> Database {
         false
     }
 
-    fn push_file(&mut self, precursor: EntryPrecursor, parent: u32) {
-        self.files.push(EntryNode {
+    fn push_entry(&mut self, precursor: EntryPrecursor, parent: u32) {
+        self.entries.push(EntryNode {
             name: precursor.name,
             parent,
+            is_dir: precursor.ftype.is_dir(),
         });
-        self.file_statuses.push(&precursor.status);
-    }
 
-    fn push_dir(&mut self, precursor: EntryPrecursor, parent: u32) {
-        self.dirs.push(EntryNode {
-            name: precursor.name,
-            parent,
-        });
-        self.dir_statuses.push(&precursor.status);
+        if let Some(size) = &mut self.size {
+            size.push(precursor.status.size.unwrap());
+        }
+        if let Some(mode) = &mut self.mode {
+            mode.push(precursor.status.mode.unwrap());
+        }
+        if let Some(created) = &mut self.created {
+            created.push(precursor.status.created.unwrap());
+        }
+        if let Some(modified) = &mut self.modified {
+            modified.push(precursor.status.modified.unwrap());
+        }
+        if let Some(accessed) = &mut self.accessed {
+            accessed.push(precursor.status.accessed.unwrap());
+        }
     }
 
     fn path_from_node(&self, node: &EntryNode) -> PathBuf {
@@ -127,10 +110,10 @@ impl<'a> Database {
     }
 
     fn path_from_node_impl(&self, index: u32, mut buf: &mut PathBuf) {
-        let dir = &self.dirs[index as usize];
+        let dir = &self.entries[index as usize];
         if dir.parent == index {
             // root node
-            buf.push(&self.dirs[dir.parent as usize].name);
+            buf.push(&self.entries[dir.parent as usize].name);
         } else {
             self.path_from_node_impl(dir.parent, &mut buf);
         }
@@ -201,13 +184,32 @@ impl DatabaseBuilder {
 
     pub fn build(&self) -> Result<Database> {
         let database = Database {
-            files: Vec::new(),
-            dirs: Vec::new(),
-            file_statuses: EntryStatusVec::new(&self.index_flags),
-            dir_statuses: EntryStatusVec::new(&IndexFlags {
-                size: false,
-                ..self.index_flags
-            }),
+            entries: Vec::new(),
+            size: if self.index_flags.size {
+                Some(Vec::new())
+            } else {
+                None
+            },
+            mode: if self.index_flags.mode {
+                Some(Vec::new())
+            } else {
+                None
+            },
+            created: if self.index_flags.created {
+                Some(Vec::new())
+            } else {
+                None
+            },
+            modified: if self.index_flags.modified {
+                Some(Vec::new())
+            } else {
+                None
+            },
+            accessed: if self.index_flags.accessed {
+                Some(Vec::new())
+            } else {
+                None
+            },
         };
 
         let database = Arc::new(Mutex::new(database));
@@ -232,27 +234,34 @@ impl DatabaseBuilder {
         dirs.dedup_by(|(_, a), (_, b)| a.starts_with(&b as &str));
 
         for (path, path_str) in &dirs {
-            let root_precursor = EntryPrecursor::from_path(&path, &self.index_flags)?;
-
+            let mut root_precursor = EntryPrecursor::from_path(&path, &self.index_flags)?;
             if !root_precursor.ftype.is_dir() {
                 continue;
             }
 
+            let dir_entries = mem::replace(&mut root_precursor.dir_entries, None).unwrap();
+
             let root_node_id = {
                 let mut db = database.lock().unwrap();
 
-                let root_node_id = db.dirs.len() as u32;
-                let root_node = EntryNode {
-                    name: (*path_str).clone(),
-                    parent: root_node_id, // points to itself
-                };
-                db.dirs.push(root_node);
-                db.dir_statuses.push(&root_precursor.status);
+                let root_node_id = db.entries.len() as u32;
+                db.push_entry(
+                    EntryPrecursor {
+                        name: path_str.to_string(),
+                        ..root_precursor
+                    },
+                    root_node_id,
+                );
 
                 root_node_id
             };
 
-            walk_file_system(database.clone(), &self.index_flags, &path, root_node_id);
+            walk_file_system(
+                database.clone(),
+                &self.index_flags,
+                &dir_entries,
+                root_node_id,
+            );
         }
 
         // safe to unwrap since above codes are the only users of database at the moment
@@ -261,27 +270,18 @@ impl DatabaseBuilder {
 }
 
 #[derive(Debug)]
-pub enum EntryId {
-    File(u32),
-    Directory(u32),
-}
-
-impl EntryId {
-    fn is_dir(&self) -> bool {
-        if let EntryId::Directory(_) = self {
-            true
-        } else {
-            false
-        }
-    }
-}
+pub struct EntryId(u32);
 
 pub struct Entry<'a, 'b> {
     database: &'a Database,
     id: &'b EntryId,
 }
 
-impl Entry<'_, '_> {
+impl<'a, 'b> Entry<'a, 'b> {
+    pub fn is_dir(&self) -> bool {
+        self.node().is_dir
+    }
+
     pub fn basename(&self) -> &str {
         &self.node().name
     }
@@ -291,11 +291,12 @@ impl Entry<'_, '_> {
     }
 
     pub fn extension(&self) -> Option<&str> {
-        if self.id.is_dir() {
+        let node = &self.node();
+        if node.is_dir {
             return None;
         }
 
-        let name = &self.node().name;
+        let name = &node.name;
         if name.contains('.') {
             name.split('.').last()
         } else {
@@ -304,42 +305,79 @@ impl Entry<'_, '_> {
     }
 
     pub fn size(&self) -> Option<u64> {
-        let (status_vec, i) = self.status_vec_index();
-        status_vec.size.as_ref().map(|v| v[i as usize])
+        self.database
+            .size
+            .as_ref()
+            .map(|v| v[self.id.0 as usize])
+            .or_else(|| {
+                if self.is_dir() {
+                    self.path().read_dir().map(|rd| rd.count() as u64).ok()
+                } else {
+                    self.path().metadata().map(|metadata| metadata.len()).ok()
+                }
+            })
     }
 
     pub fn mode(&self) -> Option<Mode> {
-        let (status_vec, i) = self.status_vec_index();
-        status_vec.mode.as_ref().map(|v| v[i as usize])
+        self.database
+            .mode
+            .as_ref()
+            .map(|v| v[self.id.0 as usize])
+            .or_else(|| {
+                self.path()
+                    .metadata()
+                    .map(|metadata| Mode::from(&metadata))
+                    .ok()
+            })
     }
 
-    pub fn created(&self) -> Option<&SystemTime> {
-        let (status_vec, i) = self.status_vec_index();
-        status_vec.created.as_ref().map(|v| &v[i as usize])
+    pub fn created(&self) -> Option<Cow<'a, SystemTime>> {
+        self.database
+            .created
+            .as_ref()
+            .map(|v| Cow::Borrowed(&v[self.id.0 as usize]))
+            .or_else(|| {
+                self.path()
+                    .metadata()
+                    .ok()
+                    .and_then(|metadata| metadata.created().ok())
+                    .and_then(|created| sanitize_system_time(&created).ok())
+                    .map(Cow::Owned)
+            })
     }
 
-    pub fn modified(&self) -> Option<&SystemTime> {
-        let (status_vec, i) = self.status_vec_index();
-        status_vec.modified.as_ref().map(|v| &v[i as usize])
+    pub fn modified(&self) -> Option<Cow<'a, SystemTime>> {
+        self.database
+            .modified
+            .as_ref()
+            .map(|v| Cow::Borrowed(&v[self.id.0 as usize]))
+            .or_else(|| {
+                self.path()
+                    .metadata()
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(|modified| sanitize_system_time(&modified).ok())
+                    .map(Cow::Owned)
+            })
     }
 
-    pub fn accessed(&self) -> Option<&SystemTime> {
-        let (status_vec, i) = self.status_vec_index();
-        status_vec.accessed.as_ref().map(|v| &v[i as usize])
+    pub fn accessed(&self) -> Option<Cow<'a, SystemTime>> {
+        self.database
+            .accessed
+            .as_ref()
+            .map(|v| Cow::Borrowed(&v[self.id.0 as usize]))
+            .or_else(|| {
+                self.path()
+                    .metadata()
+                    .ok()
+                    .and_then(|metadata| metadata.accessed().ok())
+                    .and_then(|accessed| sanitize_system_time(&accessed).ok())
+                    .map(Cow::Owned)
+            })
     }
 
     fn node(&self) -> &EntryNode {
-        match self.id {
-            EntryId::File(i) => &self.database.files[*i as usize],
-            EntryId::Directory(i) => &self.database.dirs[*i as usize],
-        }
-    }
-
-    fn status_vec_index(&self) -> (&EntryStatusVec, u32) {
-        match self.id {
-            EntryId::File(i) => (&self.database.file_statuses, *i),
-            EntryId::Directory(i) => (&self.database.dir_statuses, *i),
-        }
+        &self.database.entries[self.id.0 as usize]
     }
 }
 
@@ -347,67 +385,7 @@ impl Entry<'_, '_> {
 struct EntryNode {
     name: String,
     parent: u32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct EntryStatusVec {
-    size: Option<Vec<u64>>,
-    mode: Option<Vec<Mode>>,
-    created: Option<Vec<SystemTime>>,
-    modified: Option<Vec<SystemTime>>,
-    accessed: Option<Vec<SystemTime>>,
-}
-
-impl EntryStatusVec {
-    fn new(index_flags: &IndexFlags) -> Self {
-        Self {
-            size: if index_flags.size {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            mode: if index_flags.mode {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            created: if index_flags.created {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            modified: if index_flags.modified {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            accessed: if index_flags.accessed {
-                Some(Vec::new())
-            } else {
-                None
-            },
-        }
-    }
-}
-
-impl EntryStatusVec {
-    fn push(&mut self, status: &EntryStatus) {
-        if let Some(size) = &mut self.size {
-            size.push(status.size.unwrap());
-        }
-        if let Some(mode) = &mut self.mode {
-            mode.push(status.mode.unwrap());
-        }
-        if let Some(created) = &mut self.created {
-            created.push(status.created.unwrap());
-        }
-        if let Some(modified) = &mut self.modified {
-            modified.push(status.modified.unwrap());
-        }
-        if let Some(accessed) = &mut self.accessed {
-            accessed.push(status.accessed.unwrap());
-        }
-    }
+    is_dir: bool,
 }
 
 struct IndexFlags {
@@ -419,7 +397,6 @@ struct IndexFlags {
     ignore_hidden: bool,
 }
 
-#[derive(Serialize, Deserialize)]
 struct EntryStatus {
     size: Option<u64>,
     mode: Option<Mode>,
@@ -430,11 +407,20 @@ struct EntryStatus {
 
 impl EntryStatus {
     fn from_metadata(metadata: &Metadata, index_flags: &IndexFlags) -> Result<Self> {
-        let size = if index_flags.size && !metadata.is_dir() {
+        let size = if index_flags.size {
             Some(metadata.len())
         } else {
             None
         };
+
+        Self::from_metadata_with_size(size, metadata, index_flags)
+    }
+
+    fn from_metadata_with_size(
+        size: Option<u64>,
+        metadata: &Metadata,
+        index_flags: &IndexFlags,
+    ) -> Result<Self> {
         let mode = if index_flags.mode {
             Some(metadata.into())
         } else {
@@ -478,6 +464,7 @@ struct EntryPrecursor {
     name: String,
     ftype: FileType,
     status: EntryStatus,
+    dir_entries: Option<Vec<io::Result<DirEntry>>>,
 }
 
 impl EntryPrecursor {
@@ -492,67 +479,99 @@ impl EntryPrecursor {
         let metadata = path.metadata()?;
         let ftype = metadata.file_type();
 
-        Ok(Self {
-            name,
-            ftype,
-            status: EntryStatus::from_metadata(&metadata, index_flags)?,
-        })
+        if ftype.is_dir() {
+            let dir_entries = path.read_dir()?.collect::<Vec<_>>();
+            let num_children = dir_entries.len();
+
+            Ok(Self {
+                name,
+                ftype,
+                status: EntryStatus::from_metadata_with_size(
+                    Some(num_children as u64),
+                    &metadata,
+                    index_flags,
+                )?,
+                dir_entries: Some(dir_entries),
+            })
+        } else {
+            Ok(Self {
+                name,
+                ftype,
+                status: EntryStatus::from_metadata(&metadata, index_flags)?,
+                dir_entries: None,
+            })
+        }
     }
 
     fn from_dir_entry(dent: &DirEntry, index_flags: &IndexFlags) -> Result<Self> {
         let name = dent.file_name().to_str().ok_or(Error::Utf8)?.to_string();
+        let ftype = dent.file_type()?;
 
-        Ok(Self {
-            name,
-            ftype: dent.file_type()?,
-            status: EntryStatus::from_metadata(&dent.metadata()?, index_flags)?,
-        })
+        if ftype.is_dir() {
+            let path = dent.path();
+
+            let dir_entries = path.read_dir()?.collect::<Vec<_>>();
+            let num_children = dir_entries.len();
+
+            Ok(Self {
+                name,
+                ftype,
+                status: EntryStatus::from_metadata_with_size(
+                    Some(num_children as u64),
+                    &dent.metadata()?,
+                    index_flags,
+                )?,
+                dir_entries: Some(dir_entries),
+            })
+        } else {
+            Ok(Self {
+                name,
+                ftype,
+                status: EntryStatus::from_metadata(&dent.metadata()?, index_flags)?,
+                dir_entries: None,
+            })
+        }
     }
 }
 
 fn walk_file_system(
     database: Arc<Mutex<Database>>,
     index_flags: &IndexFlags,
-    path: &Path,
+    dir_entries: &[io::Result<DirEntry>],
     parent: u32,
 ) {
-    if let Ok(rd) = path.read_dir() {
-        let children = rd
-            .filter_map(|dent| {
-                dent.ok().as_ref().and_then(|dent| {
-                    if index_flags.ignore_hidden && is_hidden(dent) {
-                        return None;
-                    }
-                    EntryPrecursor::from_dir_entry(&dent, index_flags)
-                        .ok()
-                        .map(|precursor| (dent.path(), precursor))
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let mut sub_dirs = Vec::new();
-        {
-            let mut db = database.lock().unwrap();
-            for (path, precursor) in children {
-                if precursor.ftype.is_dir() {
-                    sub_dirs.push((path, db.dirs.len() as u32));
-                    db.push_dir(precursor, parent);
-                } else {
-                    db.push_file(precursor, parent);
+    let children = dir_entries
+        .iter()
+        .filter_map(|dent| {
+            dent.as_ref().ok().and_then(|dent| {
+                if index_flags.ignore_hidden && is_hidden(dent) {
+                    return None;
                 }
-            }
-        }
+                EntryPrecursor::from_dir_entry(&dent, index_flags).ok()
+            })
+        })
+        .collect::<Vec<_>>();
 
-        sub_dirs
-            .par_iter()
-            .for_each_with(database, |database, (path, index)| {
-                walk_file_system(database.clone(), index_flags, path, *index);
-            });
+    let mut sub_dirs = Vec::new();
+    {
+        let mut db = database.lock().unwrap();
+        for mut precursor in children {
+            if precursor.ftype.is_dir() {
+                let dir_entries = mem::replace(&mut precursor.dir_entries, None).unwrap();
+                sub_dirs.push((db.entries.len() as u32, dir_entries));
+            }
+            db.push_entry(precursor, parent);
+        }
     }
+
+    sub_dirs
+        .par_iter()
+        .for_each_with(database, |database, (index, dir_entries)| {
+            walk_file_system(database.clone(), index_flags, dir_entries, *index);
+        });
 }
 
 // taken from https://github.com/BurntSushi/ripgrep/blob/1b2c1dc67583d70d1d16fc93c90db80bead4fb09/crates/ignore/src/pathutil.rs#L6-L46
-
 #[cfg(unix)]
 fn is_hidden(dent: &DirEntry) -> bool {
     use std::os::unix::ffi::OsStrExt;

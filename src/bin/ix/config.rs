@@ -103,6 +103,7 @@ pub enum IndexKind {
 pub struct UIConfig {
     pub sort_by: ColumnKind,
     pub sort_order: SortOrder,
+    pub dirs_before_files: bool,
     pub human_readable_size: bool,
     pub datetime_format: String,
     pub columns: Vec<Column>,
@@ -116,6 +117,7 @@ impl Default for UIConfig {
         Self {
             sort_by: ColumnKind::Basename,
             sort_order: SortOrder::Ascending,
+            dirs_before_files: false,
             human_readable_size: false,
             datetime_format: "%Y/%m/%d %T".to_string(),
             columns: vec![

@@ -20,6 +20,7 @@ use crossterm::event::{
     MouseEvent,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use std::borrow::Cow;
 use std::io::{self, Write};
 use std::ops::Range;
 use std::sync::Arc;
@@ -290,7 +291,9 @@ impl<'a> TuiApp<'a> {
             ColumnKind::Extension => entry
                 .extension()
                 .map(|s| HighlightableText::Raw(s.to_string())),
-            ColumnKind::Size => self.display_size(entry.size()).map(HighlightableText::Raw),
+            ColumnKind::Size => self
+                .display_size(entry.size(), entry.is_dir())
+                .map(HighlightableText::Raw),
             ColumnKind::Mode => self.display_mode(entry.mode()).map(HighlightableText::Raw),
             ColumnKind::Created => self
                 .display_datetime(entry.created())
@@ -304,9 +307,15 @@ impl<'a> TuiApp<'a> {
         }
     }
 
-    fn display_size(&self, size: Option<u64>) -> Option<String> {
+    fn display_size(&self, size: Option<u64>, is_dir: bool) -> Option<String> {
         size.map(|s| {
-            if self.config.ui.human_readable_size {
+            if is_dir {
+                if s == 1 {
+                    format!("{} item", s)
+                } else {
+                    format!("{} items", s)
+                }
+            } else if self.config.ui.human_readable_size {
                 size::Size::Bytes(s).to_string(size::Base::Base2, size::Style::Abbreviated)
             } else {
                 format!("{}", s)
@@ -334,7 +343,7 @@ impl<'a> TuiApp<'a> {
         })
     }
 
-    fn display_datetime(&self, time: Option<&SystemTime>) -> Option<String> {
+    fn display_datetime(&self, time: Option<Cow<'_, SystemTime>>) -> Option<String> {
         time.map(|t| {
             let datetime = DateTime::<Local>::from(*t);
             format!("{}", datetime.format(&self.config.ui.datetime_format))
