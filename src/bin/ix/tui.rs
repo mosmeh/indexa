@@ -76,7 +76,7 @@ impl<'a> TuiApp<'a> {
     fn run(&mut self) -> Result<()> {
         let (load_tx, load_rx) = channel::unbounded();
         let db_path = self.config.database.location.as_ref().unwrap().clone();
-        let loader = Loader::run(db_path, load_tx)?;
+        let _loader = Loader::run(db_path, load_tx)?;
 
         let mut terminal = setup_terminal()?;
 
@@ -133,11 +133,10 @@ impl<'a> TuiApp<'a> {
                 }
             }
 
-            searcher.finish()?;
+            searcher.abort()?;
         }
 
         cleanup_terminal(&mut terminal)?;
-        loader.finish()?;
 
         Ok(())
     }
@@ -483,21 +482,17 @@ impl<'a> TuiApp<'a> {
         }
 
         let query = self.text_box_state.text();
-        if query.is_empty() {
-            self.hits.clear();
-        } else {
-            let matcher = MatcherBuilder::new(query)
-                .match_path(self.config.flags.match_path)
-                .auto_match_path(self.config.flags.auto_match_path)
-                .case_insensitive(!self.config.flags.case_sensitive)
-                .regex(self.config.flags.regex)
-                .build();
+        let matcher = MatcherBuilder::new(query)
+            .match_path(self.config.flags.match_path)
+            .auto_match_path(self.config.flags.auto_match_path)
+            .case_insensitive(!self.config.flags.case_sensitive)
+            .regex(self.config.flags.regex)
+            .build();
 
-            if let Ok(matcher) = matcher {
-                self.matcher = Some(matcher.clone());
-                self.search_in_progress = true;
-                self.matcher_tx.as_ref().unwrap().send(matcher)?;
-            }
+        if let Ok(matcher) = matcher {
+            self.matcher = Some(matcher.clone());
+            self.search_in_progress = true;
+            self.matcher_tx.as_ref().unwrap().send(matcher)?;
         }
 
         Ok(())

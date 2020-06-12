@@ -15,7 +15,15 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 pub struct Loader {
-    thread: JoinHandle<()>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for Loader {
+    fn drop(&mut self) {
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 impl Loader {
@@ -27,20 +35,25 @@ impl Loader {
             let _ = tx.send(load_database(db_path));
         });
 
-        let loader = Self { thread };
+        let loader = Self {
+            thread: Some(thread),
+        };
 
         Ok(loader)
-    }
-
-    pub fn finish(self) -> Result<()> {
-        let _ = self.thread.join();
-        Ok(())
     }
 }
 
 pub struct Searcher {
-    thread: JoinHandle<()>,
+    thread: Option<JoinHandle<()>>,
     stop_tx: Sender<()>,
+}
+
+impl Drop for Searcher {
+    fn drop(&mut self) {
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 impl Searcher {
@@ -57,15 +70,16 @@ impl Searcher {
             let _ = inner.run();
         });
 
-        let searcher = Self { thread, stop_tx };
+        let searcher = Self {
+            thread: Some(thread),
+            stop_tx,
+        };
 
         Ok(searcher)
     }
 
-    pub fn finish(self) -> Result<()> {
-        self.stop_tx.send(())?;
-        let _ = self.thread.join();
-        Ok(())
+    pub fn abort(&self) -> Result<()> {
+        self.stop_tx.send(()).map_err(Into::into)
     }
 }
 
@@ -102,11 +116,16 @@ impl SearcherImpl {
         loop {
             channel::select! {
                 recv(self.matcher_rx) -> matcher => {
-                    if let Some(search) = self.search.take() {
+                    if let Some(search) = &self.search {
                         search.abort();
                     }
 
                     let matcher = matcher?;
+                    if matcher.query_is_empty() {
+                        let _ = self.tx.send(Vec::new());
+                        continue;
+                    }
+
                     let database = self.database.clone();
                     let tx_clone = self.tx.clone();
                     let aborted = Arc::new(AtomicBool::new(false));
@@ -134,7 +153,7 @@ impl SearcherImpl {
                     });
 
                     self.search.replace(Search {
-                        thread,
+                        thread: Some(thread),
                         aborted: aborted_clone,
                     });
                 },
@@ -149,14 +168,21 @@ impl SearcherImpl {
 }
 
 struct Search {
-    thread: JoinHandle<()>,
+    thread: Option<JoinHandle<()>>,
     aborted: Arc<AtomicBool>,
 }
 
+impl Drop for Search {
+    fn drop(&mut self) {
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 impl Search {
-    fn abort(self) {
+    fn abort(&self) {
         self.aborted.store(true, atomic::Ordering::Relaxed);
-        let _ = self.thread.join();
     }
 }
 

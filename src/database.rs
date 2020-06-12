@@ -23,14 +23,14 @@ impl<'a> Database {
     }
 
     pub fn search(&self, matcher: &Matcher) -> Vec<EntryId> {
-        let match_file = |(i, node): (usize, &EntryNode)| {
+        let match_file = |(i, node): (u32, &EntryNode)| {
             if self.node_matches(node, matcher) {
                 Some(EntryId::File(i))
             } else {
                 None
             }
         };
-        let match_dir = |(i, node): (usize, &EntryNode)| {
+        let match_dir = |(i, node): (u32, &EntryNode)| {
             if self.node_matches(node, matcher) {
                 Some(EntryId::Directory(i))
             } else {
@@ -38,11 +38,11 @@ impl<'a> Database {
             }
         };
 
-        let files = (0..self.files.len())
+        let files = (0..self.files.len() as u32)
             .into_par_iter()
             .zip(self.files.par_iter())
             .filter_map(match_file);
-        let dirs = (0..self.dirs.len())
+        let dirs = (0..self.dirs.len() as u32)
             .into_par_iter()
             .zip(self.dirs.par_iter())
             .filter_map(match_dir);
@@ -55,7 +55,7 @@ impl<'a> Database {
         matcher: &Matcher,
         aborted: Arc<AtomicBool>,
     ) -> Result<Vec<EntryId>> {
-        let match_file = |(i, node): (usize, &EntryNode)| {
+        let match_file = |(i, node): (u32, &EntryNode)| {
             if aborted.load(Ordering::Relaxed) {
                 Some(Err(Error::SearchAbort))
             } else if self.node_matches(node, matcher) {
@@ -64,7 +64,7 @@ impl<'a> Database {
                 None
             }
         };
-        let match_dir = |(i, node): (usize, &EntryNode)| {
+        let match_dir = |(i, node): (u32, &EntryNode)| {
             if aborted.load(Ordering::Relaxed) {
                 Some(Err(Error::SearchAbort))
             } else if self.node_matches(node, matcher) {
@@ -74,11 +74,11 @@ impl<'a> Database {
             }
         };
 
-        let files = (0..self.files.len())
+        let files = (0..self.files.len() as u32)
             .into_par_iter()
             .zip(self.files.par_iter())
             .filter_map(match_file);
-        let dirs = (0..self.dirs.len())
+        let dirs = (0..self.dirs.len() as u32)
             .into_par_iter()
             .zip(self.dirs.par_iter())
             .filter_map(match_dir);
@@ -103,7 +103,7 @@ impl<'a> Database {
         false
     }
 
-    fn push_file(&mut self, precursor: EntryPrecursor, parent: usize) {
+    fn push_file(&mut self, precursor: EntryPrecursor, parent: u32) {
         self.files.push(EntryNode {
             name: precursor.name,
             parent,
@@ -111,7 +111,7 @@ impl<'a> Database {
         self.file_statuses.push(&precursor.status);
     }
 
-    fn push_dir(&mut self, precursor: EntryPrecursor, parent: usize) {
+    fn push_dir(&mut self, precursor: EntryPrecursor, parent: u32) {
         self.dirs.push(EntryNode {
             name: precursor.name,
             parent,
@@ -126,11 +126,11 @@ impl<'a> Database {
         buf
     }
 
-    fn path_from_node_impl(&self, index: usize, mut buf: &mut PathBuf) {
-        let dir = &self.dirs[index];
+    fn path_from_node_impl(&self, index: u32, mut buf: &mut PathBuf) {
+        let dir = &self.dirs[index as usize];
         if dir.parent == index {
             // root node
-            buf.push(&self.dirs[dir.parent].name);
+            buf.push(&self.dirs[dir.parent as usize].name);
         } else {
             self.path_from_node_impl(dir.parent, &mut buf);
         }
@@ -241,7 +241,7 @@ impl DatabaseBuilder {
             let root_node_id = {
                 let mut db = database.lock().unwrap();
 
-                let root_node_id = db.dirs.len();
+                let root_node_id = db.dirs.len() as u32;
                 let root_node = EntryNode {
                     name: (*path_str).clone(),
                     parent: root_node_id, // points to itself
@@ -262,8 +262,8 @@ impl DatabaseBuilder {
 
 #[derive(Debug)]
 pub enum EntryId {
-    File(usize),
-    Directory(usize),
+    File(u32),
+    Directory(u32),
 }
 
 impl EntryId {
@@ -305,37 +305,37 @@ impl Entry<'_, '_> {
 
     pub fn size(&self) -> Option<u64> {
         let (status_vec, i) = self.status_vec_index();
-        status_vec.size.as_ref().map(|v| v[i])
+        status_vec.size.as_ref().map(|v| v[i as usize])
     }
 
     pub fn mode(&self) -> Option<Mode> {
         let (status_vec, i) = self.status_vec_index();
-        status_vec.mode.as_ref().map(|v| v[i])
+        status_vec.mode.as_ref().map(|v| v[i as usize])
     }
 
     pub fn created(&self) -> Option<&SystemTime> {
         let (status_vec, i) = self.status_vec_index();
-        status_vec.created.as_ref().map(|v| &v[i])
+        status_vec.created.as_ref().map(|v| &v[i as usize])
     }
 
     pub fn modified(&self) -> Option<&SystemTime> {
         let (status_vec, i) = self.status_vec_index();
-        status_vec.modified.as_ref().map(|v| &v[i])
+        status_vec.modified.as_ref().map(|v| &v[i as usize])
     }
 
     pub fn accessed(&self) -> Option<&SystemTime> {
         let (status_vec, i) = self.status_vec_index();
-        status_vec.accessed.as_ref().map(|v| &v[i])
+        status_vec.accessed.as_ref().map(|v| &v[i as usize])
     }
 
     fn node(&self) -> &EntryNode {
         match self.id {
-            EntryId::File(i) => &self.database.files[*i],
-            EntryId::Directory(i) => &self.database.dirs[*i],
+            EntryId::File(i) => &self.database.files[*i as usize],
+            EntryId::Directory(i) => &self.database.dirs[*i as usize],
         }
     }
 
-    fn status_vec_index(&self) -> (&EntryStatusVec, usize) {
+    fn status_vec_index(&self) -> (&EntryStatusVec, u32) {
         match self.id {
             EntryId::File(i) => (&self.database.file_statuses, *i),
             EntryId::Directory(i) => (&self.database.dir_statuses, *i),
@@ -346,7 +346,7 @@ impl Entry<'_, '_> {
 #[derive(Debug, Serialize, Deserialize)]
 struct EntryNode {
     name: String,
-    parent: usize,
+    parent: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -514,7 +514,7 @@ fn walk_file_system(
     database: Arc<Mutex<Database>>,
     index_flags: &IndexFlags,
     path: &Path,
-    parent: usize,
+    parent: u32,
 ) {
     if let Ok(rd) = path.read_dir() {
         let children = rd
@@ -530,12 +530,12 @@ fn walk_file_system(
             })
             .collect::<Vec<_>>();
 
-        let mut sub_directories = Vec::new();
+        let mut sub_dirs = Vec::new();
         {
             let mut db = database.lock().unwrap();
             for (path, precursor) in children {
                 if precursor.ftype.is_dir() {
-                    sub_directories.push((path, db.dirs.len()));
+                    sub_dirs.push((path, db.dirs.len() as u32));
                     db.push_dir(precursor, parent);
                 } else {
                     db.push_file(precursor, parent);
@@ -543,7 +543,7 @@ fn walk_file_system(
             }
         }
 
-        sub_directories
+        sub_dirs
             .par_iter()
             .for_each_with(database, |database, (path, index)| {
                 walk_file_system(database.clone(), index_flags, path, *index);

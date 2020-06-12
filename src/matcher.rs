@@ -11,6 +11,10 @@ pub struct Matcher {
 }
 
 impl Matcher {
+    pub fn query_is_empty(&self) -> bool {
+        self.query.as_str().is_empty()
+    }
+
     pub fn is_match(&self, entry: &Entry) -> bool {
         if self.match_path {
             entry
