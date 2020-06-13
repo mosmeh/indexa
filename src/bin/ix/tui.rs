@@ -95,7 +95,10 @@ impl<'a> TuiApp<'a> {
                 recv(load_rx) -> database => break Some(database??),
                 recv(input_rx) -> event => {
                     match self.handle_input(event?)? {
-                        State::Aborted | State::Accepted => break None,
+                        State::Aborted | State::Accepted => {
+                            cleanup_terminal(&mut terminal)?;
+                            break None;
+                        }
                         _ => (),
                     }
                 }
@@ -130,7 +133,10 @@ impl<'a> TuiApp<'a> {
                     }
                     recv(input_rx) -> event => {
                         match self.handle_input(event?)? {
-                            State::Aborted => break,
+                            State::Aborted => {
+                                cleanup_terminal(&mut terminal)?;
+                                break;
+                            },
                             State::Accepted => {
                                 cleanup_terminal(&mut terminal)?;
                                 self.on_accept()?;
@@ -144,8 +150,6 @@ impl<'a> TuiApp<'a> {
 
             searcher.abort()?;
         }
-
-        cleanup_terminal(&mut terminal)?;
 
         Ok(())
     }
