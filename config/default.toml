@@ -1,6 +1,9 @@
 # Default values for command-line flags.
 # Flags provided to CLI will override this config.
 [flags]
+# Initial query.
+# query = "blah blah"
+
 # Whether to search case sensitively.
 # case_sensitive = false
 

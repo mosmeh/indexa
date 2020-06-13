@@ -66,7 +66,9 @@ impl<'a> TuiApp<'a> {
             hits: Vec::new(),
             search_in_progress: false,
             matcher_tx: None,
-            text_box_state: Default::default(),
+            text_box_state: TextBoxState::with_text(
+                config.flags.query.clone().unwrap_or_else(|| "".to_string()),
+            ),
             table_state: Default::default(),
             page_shift_amount: 0,
         };

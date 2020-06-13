@@ -20,6 +20,10 @@ use structopt::StructOpt;
     setting(clap::AppSettings::DeriveDisplayOrder)
 )]
 pub struct Opt {
+    /// Initial query.
+    #[structopt(short = "q", long)]
+    query: Option<String>,
+
     /// Search case sensitively.
     #[structopt(short = "s", long)]
     case_sensitive: bool,

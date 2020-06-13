@@ -20,6 +20,7 @@ pub struct Config {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FlagConfig {
+    pub query: Option<String>,
     pub case_sensitive: bool,
     pub match_path: bool,
     pub auto_match_path: bool,
@@ -30,6 +31,7 @@ pub struct FlagConfig {
 impl Default for FlagConfig {
     fn default() -> Self {
         Self {
+            query: None,
             case_sensitive: false,
             match_path: false,
             auto_match_path: false,
@@ -41,6 +43,10 @@ impl Default for FlagConfig {
 
 impl FlagConfig {
     pub fn merge_opt(&mut self, opt: &Opt) {
+        if let Some(query) = &opt.query {
+            self.query = Some(query.clone());
+        }
+
         self.case_sensitive |= opt.case_sensitive;
         self.match_path |= opt.match_path;
         self.auto_match_path |= opt.auto_match_path;

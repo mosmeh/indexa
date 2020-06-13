@@ -66,6 +66,20 @@ pub struct TextBoxState {
 }
 
 impl TextBoxState {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn with_text(text: String) -> Self {
+        let len = text.len();
+        Self {
+            text,
+            grapheme_cursor: GraphemeCursor::new(len, len, true),
+            char_cursor: len,
+        }
+    }
+
     pub fn text(&self) -> &str {
         &self.text
     }
