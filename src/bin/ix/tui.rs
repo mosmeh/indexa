@@ -1,7 +1,7 @@
 mod table;
 mod text_box;
 
-use crate::config::Config;
+use crate::config::{Config, SortOrder};
 use crate::worker::{Loader, Searcher};
 
 use table::{HighlightableText, Row, Table, TableState};
@@ -209,7 +209,16 @@ impl<'a> TuiApp<'a> {
     fn draw_table(&mut self, f: &mut Frame<Backend>, area: Rect, terminal_width: u16) {
         let columns = &self.config.ui.columns;
 
-        let header = columns.iter().map(|column| format!("{}", column.status));
+        let header = columns.iter().map(|column| {
+            if column.status == self.config.ui.sort_by {
+                match self.config.ui.sort_order {
+                    SortOrder::Ascending => format!("{}▲", column.status),
+                    SortOrder::Descending => format!("{}▼", column.status),
+                }
+            } else {
+                format!("{}", column.status)
+            }
+        });
 
         let items = self.hits.iter().map(|id| {
             let entry = self.database.as_ref().unwrap().entry(id);
