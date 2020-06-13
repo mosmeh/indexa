@@ -4,6 +4,7 @@ use crate::{Error, Result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::fmt;
 use std::fs::{DirEntry, FileType, Metadata};
 use std::io;
 use std::mem;
@@ -15,19 +16,32 @@ use std::time::SystemTime;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
     entries: Vec<EntryNode>,
+    basename_sort_key: Option<Vec<u32>>,
+    path_sort_key: Option<Vec<u32>>,
+    extension_sort_key: Option<Vec<u32>>,
     size: Option<Vec<u64>>,
     mode: Option<Vec<Mode>>,
     created: Option<Vec<SystemTime>>,
     modified: Option<Vec<SystemTime>>,
     accessed: Option<Vec<SystemTime>>,
-    basename_sort_key: Option<Vec<u32>>,
-    path_sort_key: Option<Vec<u32>>,
-    extension_sort_key: Option<Vec<u32>>,
 }
 
 impl Database {
     pub fn num_entries(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn is_indexed(&self, kind: StatusKind) -> bool {
+        match kind {
+            StatusKind::Basename => self.basename_sort_key.is_some(),
+            StatusKind::FullPath => self.path_sort_key.is_some(),
+            StatusKind::Extension => self.extension_sort_key.is_some(),
+            StatusKind::Size => self.size.is_some(),
+            StatusKind::Mode => self.mode.is_some(),
+            StatusKind::Created => self.created.is_some(),
+            StatusKind::Modified => self.modified.is_some(),
+            StatusKind::Accessed => self.accessed.is_some(),
+        }
     }
 
     pub fn search(&self, matcher: &Matcher) -> Vec<EntryId> {
@@ -179,43 +193,17 @@ impl DatabaseBuilder {
         self
     }
 
-    pub fn basename(&mut self, yes: bool) -> &mut Self {
-        self.fast_sort_flags.basename = yes;
-        self
-    }
-
-    pub fn path(&mut self, yes: bool) -> &mut Self {
-        self.fast_sort_flags.path = yes;
-        self
-    }
-
-    pub fn extension(&mut self, yes: bool) -> &mut Self {
-        self.fast_sort_flags.extension = yes;
-        self
-    }
-
-    pub fn size(&mut self, yes: bool) -> &mut Self {
-        self.index_flags.size = yes;
-        self
-    }
-
-    pub fn mode(&mut self, yes: bool) -> &mut Self {
-        self.index_flags.mode = yes;
-        self
-    }
-
-    pub fn created(&mut self, yes: bool) -> &mut Self {
-        self.index_flags.created = yes;
-        self
-    }
-
-    pub fn modified(&mut self, yes: bool) -> &mut Self {
-        self.index_flags.modified = yes;
-        self
-    }
-
-    pub fn accessed(&mut self, yes: bool) -> &mut Self {
-        self.index_flags.accessed = yes;
+    pub fn add_status(&mut self, kind: StatusKind) -> &mut Self {
+        match kind {
+            StatusKind::Basename => self.fast_sort_flags.basename = true,
+            StatusKind::FullPath => self.fast_sort_flags.path = true,
+            StatusKind::Extension => self.fast_sort_flags.extension = true,
+            StatusKind::Size => self.index_flags.size = true,
+            StatusKind::Mode => self.index_flags.mode = true,
+            StatusKind::Created => self.index_flags.created = true,
+            StatusKind::Modified => self.index_flags.modified = true,
+            StatusKind::Accessed => self.index_flags.accessed = true,
+        };
         self
     }
 
@@ -332,23 +320,33 @@ impl DatabaseBuilder {
     }
 }
 
-fn generate_sort_keys<F>(database: &Database, compare_func: F) -> Vec<u32>
-where
-    F: Fn(&Entry, &Entry) -> std::cmp::Ordering + Send + Sync,
-{
-    let mut indices = (0..database.entries.len() as u32).collect::<Vec<_>>();
-    indices
-        .as_parallel_slice_mut()
-        .par_sort_unstable_by(|a, b| {
-            compare_func(&database.entry(&EntryId(*a)), &database.entry(&EntryId(*b)))
-        });
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusKind {
+    Basename,
+    #[serde(rename = "path")]
+    FullPath,
+    Extension,
+    Size,
+    Mode,
+    Created,
+    Modified,
+    Accessed,
+}
 
-    let mut sort_keys = vec![0; indices.len()];
-    for (i, x) in indices.iter().enumerate() {
-        sort_keys[*x as usize] = i as u32;
+impl fmt::Display for StatusKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StatusKind::FullPath => f.write_str("Path"),
+            StatusKind::Basename => f.write_str("Basename"),
+            StatusKind::Size => f.write_str("Size"),
+            StatusKind::Mode => f.write_str("Mode"),
+            StatusKind::Extension => f.write_str("Extension"),
+            StatusKind::Created => f.write_str("Created"),
+            StatusKind::Modified => f.write_str("Modified"),
+            StatusKind::Accessed => f.write_str("Accessed"),
+        }
     }
-
-    sort_keys
 }
 
 #[derive(Debug)]
@@ -567,12 +565,6 @@ impl EntryStatus {
     }
 }
 
-fn sanitize_system_time(time: &SystemTime) -> Result<SystemTime> {
-    // metadata may contain invalid SystemTime
-    // it will catch them as Err instead of panic
-    Ok(SystemTime::UNIX_EPOCH + time.duration_since(SystemTime::UNIX_EPOCH)?)
-}
-
 struct EntryPrecursor {
     name: String,
     ftype: FileType,
@@ -645,6 +637,31 @@ impl EntryPrecursor {
             })
         }
     }
+}
+
+fn generate_sort_keys<F>(database: &Database, compare_func: F) -> Vec<u32>
+where
+    F: Fn(&Entry, &Entry) -> std::cmp::Ordering + Send + Sync,
+{
+    let mut indices = (0..database.entries.len() as u32).collect::<Vec<_>>();
+    indices
+        .as_parallel_slice_mut()
+        .par_sort_unstable_by(|a, b| {
+            compare_func(&database.entry(&EntryId(*a)), &database.entry(&EntryId(*b)))
+        });
+
+    let mut sort_keys = vec![0; indices.len()];
+    for (i, x) in indices.iter().enumerate() {
+        sort_keys[*x as usize] = i as u32;
+    }
+
+    sort_keys
+}
+
+fn sanitize_system_time(time: &SystemTime) -> Result<SystemTime> {
+    // metadata may contain invalid SystemTime
+    // it will catch them as Err instead of panic
+    Ok(SystemTime::UNIX_EPOCH + time.duration_since(SystemTime::UNIX_EPOCH)?)
 }
 
 fn walk_file_system(

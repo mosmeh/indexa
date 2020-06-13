@@ -1,8 +1,10 @@
 use crate::Opt;
+
+use indexa::database::StatusKind;
+
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::fmt;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -150,35 +152,6 @@ impl Default for UIConfigWindows {
     fn default() -> Self {
         Self {
             mode_format: ModeFormatWindows::Traditional,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum StatusKind {
-    Basename,
-    #[serde(rename = "path")]
-    FullPath,
-    Extension,
-    Size,
-    Mode,
-    Created,
-    Modified,
-    Accessed,
-}
-
-impl fmt::Display for StatusKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StatusKind::FullPath => f.write_str("Path"),
-            StatusKind::Basename => f.write_str("Basename"),
-            StatusKind::Size => f.write_str("Size"),
-            StatusKind::Mode => f.write_str("Mode"),
-            StatusKind::Extension => f.write_str("Extension"),
-            StatusKind::Created => f.write_str("Created"),
-            StatusKind::Modified => f.write_str("Modified"),
-            StatusKind::Accessed => f.write_str("Accessed"),
         }
     }
 }

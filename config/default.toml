@@ -32,7 +32,7 @@
 ignore_hidden = false
 
 [ui]
-# File/directory statuses to sort by. The status has to be indexed.
+# File/directory status to sort by. The status has to be indexed.
 sort_by = "basename"
 
 # Sort order. [ascending, descending]

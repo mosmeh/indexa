@@ -1,6 +1,6 @@
-use crate::config::{Config, SortOrder, StatusKind};
+use crate::config::{Config, SortOrder};
 
-use indexa::database::{Database, Entry, EntryId};
+use indexa::database::{Database, Entry, EntryId, StatusKind};
 use indexa::matcher::Matcher;
 
 use anyhow::Result;

@@ -1,13 +1,13 @@
 mod table;
 mod text_box;
 
-use crate::config::{Config, StatusKind};
+use crate::config::Config;
 use crate::worker::{Loader, Searcher};
 
 use table::{HighlightableText, Row, Table, TableState};
 use text_box::{TextBox, TextBoxState};
 
-use indexa::database::{Database, Entry, EntryId};
+use indexa::database::{Database, Entry, EntryId, StatusKind};
 use indexa::matcher::{MatchDetail, Matcher, MatcherBuilder};
 use indexa::mode::Mode;
 
@@ -59,10 +59,6 @@ struct TuiApp<'a> {
 
 impl<'a> TuiApp<'a> {
     fn new(config: &'a Config) -> Result<Self> {
-        if !config.database.index.contains(&config.ui.sort_by) {
-            return Err(anyhow!("File/directory status to sort by must be indexed"));
-        }
-
         let app = Self {
             config,
             database: None,
@@ -107,6 +103,14 @@ impl<'a> TuiApp<'a> {
         };
 
         if let Some(database) = database {
+            if !database.is_indexed(self.config.ui.sort_by) {
+                cleanup_terminal(&mut terminal)?;
+                return Err(anyhow!(
+                    "You cannot sort by a non-indexed status. \
+                Please edit the config file and/or update the database."
+                ));
+            }
+
             let database = Arc::new(database);
             self.database = Some(Arc::clone(&database));
 

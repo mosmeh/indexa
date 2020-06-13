@@ -2,9 +2,7 @@ mod config;
 mod tui;
 mod worker;
 
-use config::StatusKind;
-
-use indexa::database::DatabaseBuilder;
+use indexa::database::{DatabaseBuilder, StatusKind};
 
 use anyhow::{anyhow, Result};
 use rayon::ThreadPoolBuilder;
@@ -85,22 +83,11 @@ fn main() -> Result<()> {
         }
 
         let mut db_builder = DatabaseBuilder::new();
-
         for dir in &config.database.dirs {
             db_builder.add_dir(&dir);
         }
-
         for kind in &config.database.index {
-            match kind {
-                StatusKind::Basename => db_builder.basename(true),
-                StatusKind::FullPath => db_builder.path(true),
-                StatusKind::Extension => db_builder.extension(true),
-                StatusKind::Size => db_builder.size(true),
-                StatusKind::Created => db_builder.created(true),
-                StatusKind::Modified => db_builder.modified(true),
-                StatusKind::Accessed => db_builder.accessed(true),
-                StatusKind::Mode => db_builder.mode(true),
-            };
+            db_builder.add_status(*kind);
         }
 
         let database = db_builder
