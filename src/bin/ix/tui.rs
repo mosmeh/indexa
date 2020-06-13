@@ -37,7 +37,7 @@ pub fn run(config: &Config) -> Result<()> {
     TuiApp::new(config)?.run()
 }
 
-type Backend = CrosstermBackend<io::Stdout>;
+type Backend = CrosstermBackend<io::Stderr>;
 
 enum State {
     Continue,
@@ -531,9 +531,9 @@ impl<'a> TuiApp<'a> {
 
 fn setup_terminal() -> Result<Terminal<Backend>> {
     terminal::enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
+    let mut stderr = io::stderr();
+    crossterm::execute!(stderr, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stderr);
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
     terminal.clear()?;

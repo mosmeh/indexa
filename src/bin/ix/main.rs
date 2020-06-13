@@ -73,9 +73,9 @@ fn main() -> Result<()> {
 
     if opt.update || !db_location.exists() {
         if db_location.exists() {
-            println!("Updating database");
+            eprintln!("Updating database");
         } else {
-            println!("Creating database");
+            eprintln!("Creating database");
 
             if let Some(parent) = db_location.parent() {
                 fs::create_dir_all(parent)?;
