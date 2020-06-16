@@ -1,9 +1,11 @@
 use crate::matcher::Matcher;
 use crate::mode::Mode;
 use crate::{Error, Result};
+use itertools::Itertools;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::cmp;
 use std::fmt;
 use std::fs::{DirEntry, FileType, Metadata};
 use std::io;
@@ -16,6 +18,7 @@ use std::time::SystemTime;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
     entries: Vec<EntryNode>,
+    root_ids: Vec<u32>,
     basename_sort_key: Option<Vec<u32>>,
     path_sort_key: Option<Vec<u32>>,
     extension_sort_key: Option<Vec<u32>>,
@@ -44,32 +47,58 @@ impl Database {
         }
     }
 
-    pub fn search(&self, matcher: &Matcher) -> Vec<EntryId> {
-        (0..self.entries.len() as u32)
-            .into_par_iter()
-            .zip(self.entries.par_iter())
-            .filter_map(|(i, node): (u32, &EntryNode)| {
-                if self.node_matches(node, matcher) {
-                    Some(EntryId(i))
-                } else {
-                    None
-                }
-            })
-            .collect()
+    pub fn search(&self, matcher: &Matcher, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+        if matcher.match_path {
+            self.match_path(matcher, aborted)
+        } else {
+            self.match_basename(matcher, aborted)
+        }
     }
 
-    pub fn abortable_search(
+    #[inline]
+    pub fn entry(&self, id: EntryId) -> Entry<'_> {
+        Entry { database: self, id }
+    }
+
+    /// Compares two entries by specified status using indexed information.
+    ///
+    /// Returns `None` if it cannot perform the fast comparison by specified status.
+    #[inline]
+    pub fn fast_compare(
         &self,
-        matcher: &Matcher,
-        aborted: Arc<AtomicBool>,
-    ) -> Result<Vec<EntryId>> {
+        kind: StatusKind,
+        a: &Entry<'_>,
+        b: &Entry<'_>,
+    ) -> Option<cmp::Ordering> {
+        match kind {
+            StatusKind::Basename => Database::compare_entries(&self.basename_sort_key, a, b),
+            StatusKind::FullPath => Database::compare_entries(&self.path_sort_key, a, b),
+            StatusKind::Extension => Database::compare_entries(&self.extension_sort_key, a, b),
+            StatusKind::Size => Database::compare_entries(&self.size, a, b),
+            StatusKind::Mode => Database::compare_entries(&self.mode, a, b),
+            StatusKind::Created => Database::compare_entries(&self.created, a, b),
+            StatusKind::Modified => Database::compare_entries(&self.modified, a, b),
+            StatusKind::Accessed => Database::compare_entries(&self.accessed, a, b),
+        }
+    }
+
+    #[inline]
+    fn compare_entries<T>(key: &Option<Vec<T>>, a: &Entry, b: &Entry) -> Option<cmp::Ordering>
+    where
+        T: Ord,
+    {
+        key.as_ref()
+            .map(|x| x[a.id.0 as usize].cmp(&x[b.id.0 as usize]))
+    }
+
+    fn match_basename(&self, matcher: &Matcher, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
         (0..self.entries.len() as u32)
             .into_par_iter()
             .zip(self.entries.par_iter())
-            .filter_map(|(i, node): (u32, &EntryNode)| {
+            .filter_map(|(i, node)| {
                 if aborted.load(Ordering::Relaxed) {
                     Some(Err(Error::SearchAbort))
-                } else if self.node_matches(node, matcher) {
+                } else if matcher.query.is_match(&node.name) {
                     Some(Ok(EntryId(i)))
                 } else {
                     None
@@ -78,27 +107,109 @@ impl Database {
             .collect()
     }
 
-    pub fn entry<'a, 'b>(&'a self, id: &'b EntryId) -> Entry<'a, 'b> {
-        Entry { database: self, id }
+    fn match_path(&self, matcher: &Matcher, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+        let mut hits = Vec::with_capacity(self.entries.len());
+        for _ in 0..self.entries.len() {
+            hits.push(AtomicBool::new(false));
+        }
+
+        for (root_id, next_root_id) in self
+            .root_ids
+            .iter()
+            .copied()
+            .chain(std::iter::once(self.entries.len() as u32))
+            .tuple_windows()
+        {
+            let root_node = &self.entries[root_id as usize];
+            if matcher.query.is_match(&root_node.name) {
+                (root_id..next_root_id).into_par_iter().try_for_each(|id| {
+                    if aborted.load(Ordering::Relaxed) {
+                        return Err(Error::SearchAbort);
+                    }
+                    hits[id as usize].store(true, Ordering::Relaxed);
+                    Ok(())
+                })?;
+            } else {
+                self.match_path_impl(
+                    root_node,
+                    Path::new(&root_node.name),
+                    matcher,
+                    &hits,
+                    aborted.clone(),
+                )?;
+            }
+        }
+
+        Ok((0..self.entries.len() as u32)
+            .into_par_iter()
+            .filter(|id| hits[*id as usize].load(Ordering::Relaxed))
+            .map(EntryId)
+            .collect())
     }
 
-    fn node_matches(&self, node: &EntryNode, matcher: &Matcher) -> bool {
-        if matcher.match_path {
-            if let Some(path) = self.path_from_node(node).to_str() {
-                if matcher.query.is_match(path) {
-                    return true;
+    fn match_path_impl(
+        &self,
+        node: &EntryNode,
+        path: &Path,
+        matcher: &Matcher,
+        hits: &[AtomicBool],
+        aborted: Arc<AtomicBool>,
+    ) -> Result<()> {
+        (node.children_start..node.children_end)
+            .into_par_iter()
+            .try_for_each(|id| {
+                if aborted.load(Ordering::Relaxed) {
+                    return Err(Error::SearchAbort);
                 }
-            }
-        } else if matcher.query.is_match(&node.name) {
-            return true;
-        }
-        false
+
+                let child = &self.entries[id as usize];
+                let child_path = path.join(&child.name);
+                if let Some(s) = child_path.to_str() {
+                    if matcher.query.is_match(s) {
+                        hits[id as usize].store(true, Ordering::Relaxed);
+
+                        if child.is_dir {
+                            self.match_all_descendants(child, hits, aborted.clone())?;
+                        }
+                    } else if child.is_dir {
+                        self.match_path_impl(child, &child_path, matcher, hits, aborted.clone())?;
+                    }
+                }
+
+                Ok(())
+            })
+    }
+
+    fn match_all_descendants(
+        &self,
+        node: &EntryNode,
+        hits: &[AtomicBool],
+        aborted: Arc<AtomicBool>,
+    ) -> Result<()> {
+        (node.children_start..node.children_end)
+            .into_par_iter()
+            .try_for_each(|id| {
+                if aborted.load(Ordering::Relaxed) {
+                    return Err(Error::SearchAbort);
+                }
+
+                hits[id as usize].store(true, Ordering::Relaxed);
+
+                let child = &self.entries[id as usize];
+                if child.is_dir && child.children_start < child.children_end {
+                    self.match_all_descendants(child, hits, aborted.clone())?;
+                }
+
+                Ok(())
+            })
     }
 
     fn push_entry(&mut self, precursor: EntryPrecursor, parent: u32) {
         self.entries.push(EntryNode {
             name: precursor.name,
             parent,
+            children_start: u32::MAX,
+            children_end: u32::MAX,
             is_dir: precursor.ftype.is_dir(),
         });
 
@@ -215,6 +326,7 @@ impl DatabaseBuilder {
     pub fn build(&self) -> Result<Database> {
         let database = Database {
             entries: Vec::new(),
+            root_ids: Vec::new(),
             size: if self.index_flags.size {
                 Some(Vec::new())
             } else {
@@ -285,6 +397,7 @@ impl DatabaseBuilder {
                     },
                     root_node_id,
                 );
+                db.root_ids.push(root_node_id);
 
                 root_node_id
             };
@@ -349,41 +462,31 @@ impl fmt::Display for StatusKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct EntryId(u32);
 
-pub struct Entry<'a, 'b> {
+pub struct Entry<'a> {
     database: &'a Database,
-    id: &'b EntryId,
+    id: EntryId,
 }
 
-impl<'a, 'b> Entry<'a, 'b> {
+impl<'a> Entry<'a> {
+    #[inline]
     pub fn is_dir(&self) -> bool {
         self.node().is_dir
     }
 
+    #[inline]
     pub fn basename(&self) -> &str {
         &self.node().name
     }
 
-    pub fn basename_sort_key(&self) -> Option<u32> {
-        self.database
-            .basename_sort_key
-            .as_ref()
-            .map(|v| v[self.id.0 as usize])
-    }
-
+    #[inline]
     pub fn path(&self) -> PathBuf {
         self.database.path_from_node(&self.node())
     }
 
-    pub fn path_sort_key(&self) -> Option<u32> {
-        self.database
-            .path_sort_key
-            .as_ref()
-            .map(|v| v[self.id.0 as usize])
-    }
-
+    #[inline]
     pub fn extension(&self) -> Option<&str> {
         let node = &self.node();
         if node.is_dir {
@@ -398,13 +501,7 @@ impl<'a, 'b> Entry<'a, 'b> {
         }
     }
 
-    pub fn extension_sort_key(&self) -> Option<u32> {
-        self.database
-            .extension_sort_key
-            .as_ref()
-            .map(|v| v[self.id.0 as usize])
-    }
-
+    #[inline]
     pub fn size(&self) -> Option<u64> {
         self.database
             .size
@@ -419,6 +516,7 @@ impl<'a, 'b> Entry<'a, 'b> {
             })
     }
 
+    #[inline]
     pub fn mode(&self) -> Option<Mode> {
         self.database
             .mode
@@ -432,6 +530,7 @@ impl<'a, 'b> Entry<'a, 'b> {
             })
     }
 
+    #[inline]
     pub fn created(&self) -> Option<Cow<'a, SystemTime>> {
         self.database
             .created
@@ -447,6 +546,7 @@ impl<'a, 'b> Entry<'a, 'b> {
             })
     }
 
+    #[inline]
     pub fn modified(&self) -> Option<Cow<'a, SystemTime>> {
         self.database
             .modified
@@ -462,6 +562,7 @@ impl<'a, 'b> Entry<'a, 'b> {
             })
     }
 
+    #[inline]
     pub fn accessed(&self) -> Option<Cow<'a, SystemTime>> {
         self.database
             .accessed
@@ -477,10 +578,12 @@ impl<'a, 'b> Entry<'a, 'b> {
             })
     }
 
+    #[inline]
     fn path_vec(&'a self) -> Vec<&'a str> {
         self.database.path_vec_from_node(&self.node())
     }
 
+    #[inline]
     fn node(&self) -> &EntryNode {
         &self.database.entries[self.id.0 as usize]
     }
@@ -490,6 +593,8 @@ impl<'a, 'b> Entry<'a, 'b> {
 struct EntryNode {
     name: String,
     parent: u32,
+    children_start: u32,
+    children_end: u32,
     is_dir: bool,
 }
 
@@ -647,7 +752,7 @@ where
     indices
         .as_parallel_slice_mut()
         .par_sort_unstable_by(|a, b| {
-            compare_func(&database.entry(&EntryId(*a)), &database.entry(&EntryId(*b)))
+            compare_func(&database.entry(EntryId(*a)), &database.entry(EntryId(*b)))
         });
 
     let mut sort_keys = vec![0; indices.len()];
@@ -685,6 +790,9 @@ fn walk_file_system(
     let mut sub_dirs = Vec::new();
     {
         let mut db = database.lock().unwrap();
+
+        db.entries[parent as usize].children_start = db.entries.len() as u32;
+
         for mut precursor in children {
             if precursor.ftype.is_dir() {
                 let dir_entries = mem::replace(&mut precursor.dir_entries, None).unwrap();
@@ -692,6 +800,8 @@ fn walk_file_system(
             }
             db.push_entry(precursor, parent);
         }
+
+        db.entries[parent as usize].children_end = db.entries.len() as u32;
     }
 
     sub_dirs

@@ -192,7 +192,7 @@ impl<'a> TuiApp<'a> {
                     self.database
                         .as_ref()
                         .unwrap()
-                        .entry(id)
+                        .entry(*id)
                         .path()
                         .to_str()
                         .map(|s| s.to_string())
@@ -227,7 +227,7 @@ impl<'a> TuiApp<'a> {
         });
 
         let items = self.hits.iter().map(|id| {
-            let entry = self.database.as_ref().unwrap().entry(id);
+            let entry = self.database.as_ref().unwrap().entry(*id);
             let match_detail = self.matcher.as_ref().unwrap().match_detail(&entry).unwrap();
             let contents = columns
                 .iter()
@@ -499,7 +499,7 @@ impl<'a> TuiApp<'a> {
                 self.database
                     .as_ref()
                     .unwrap()
-                    .entry(id)
+                    .entry(*id)
                     .path()
                     .to_str()
                     .unwrap()

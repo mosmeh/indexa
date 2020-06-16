@@ -133,15 +133,15 @@ impl SearcherImpl {
                     let aborted = Arc::new(AtomicBool::new(false));
                     let aborted_clone = aborted.clone();
 
-                    let compare_func = build_compare_func(&self.sort_by, &self.sort_order, self.dirs_before_files);
+                    let compare_func = build_compare_func(self.database.clone(), self.sort_by, self.sort_order, self.dirs_before_files);
 
                     let thread = thread::spawn(move || {
                         let hits = {
-                            let result = database.abortable_search(&matcher, aborted.clone());
+                            let result = database.search(&matcher, aborted.clone());
                             result.map(|mut hits| {
                                 hits.as_parallel_slice_mut()
                                     .par_sort_unstable_by(|a, b| {
-                                        compare_func(&database.entry(a), &database.entry(b))
+                                        compare_func(&database.entry(*a), &database.entry(*b))
                                     });
                                 hits
                             })
@@ -198,29 +198,11 @@ where
 }
 
 fn build_compare_func(
-    sort_by: &StatusKind,
-    sort_order: &SortOrder,
+    database: Arc<Database>,
+    sort_by: StatusKind,
+    sort_order: SortOrder,
     dirs_before_files: bool,
 ) -> Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> {
-    let cmp_status: Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> = match sort_by {
-        StatusKind::Basename => {
-            Box::new(move |a, b| a.basename_sort_key().cmp(&b.basename_sort_key()))
-        }
-        StatusKind::FullPath => Box::new(move |a, b| a.path_sort_key().cmp(&b.path_sort_key())),
-        StatusKind::Extension => {
-            Box::new(move |a, b| a.extension_sort_key().cmp(&b.extension_sort_key()))
-        }
-        StatusKind::Size => Box::new(move |a, b| {
-            b.is_dir()
-                .cmp(&a.is_dir())
-                .then_with(|| a.size().cmp(&b.size()))
-        }),
-        StatusKind::Mode => Box::new(move |a, b| a.mode().cmp(&b.mode())),
-        StatusKind::Created => Box::new(move |a, b| a.created().cmp(&b.created())),
-        StatusKind::Modified => Box::new(move |a, b| a.modified().cmp(&b.modified())),
-        StatusKind::Accessed => Box::new(move |a, b| a.accessed().cmp(&b.accessed())),
-    };
-
     let cmp_file_dir: Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> =
         if dirs_before_files {
             Box::new(move |a, b| b.is_dir().cmp(&a.is_dir()))
@@ -233,12 +215,28 @@ fn build_compare_func(
     // 3. (optional) reverse
     match sort_order {
         SortOrder::Ascending => Box::new(move |a, b| {
-            cmp_file_dir(a, b)
-                .then_with(|| cmp_status(a, b).then_with(|| a.basename().cmp(b.basename())))
+            cmp_file_dir(a, b).then_with(|| {
+                database
+                    .fast_compare(sort_by, &a, &b)
+                    .unwrap_or(cmp::Ordering::Equal)
+                    .then_with(|| {
+                        database
+                            .fast_compare(StatusKind::Basename, a, b)
+                            .unwrap_or(cmp::Ordering::Equal)
+                    })
+            })
         }),
         SortOrder::Descending => Box::new(move |a, b| {
-            cmp_file_dir(a, b)
-                .then_with(|| cmp_status(b, a).then_with(|| b.basename().cmp(a.basename())))
+            cmp_file_dir(a, b).then_with(|| {
+                database
+                    .fast_compare(sort_by, &b, &a)
+                    .unwrap_or(cmp::Ordering::Equal)
+                    .then_with(|| {
+                        database
+                            .fast_compare(StatusKind::Basename, b, a)
+                            .unwrap_or(cmp::Ordering::Equal)
+                    })
+            })
         }),
     }
 }
