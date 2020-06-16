@@ -541,8 +541,7 @@ impl<'a> Entry<'a> {
                     .metadata()
                     .ok()
                     .and_then(|metadata| metadata.created().ok())
-                    .and_then(|created| sanitize_system_time(&created).ok())
-                    .map(Cow::Owned)
+                    .map(|created| Cow::Owned(sanitize_system_time(&created)))
             })
     }
 
@@ -557,8 +556,7 @@ impl<'a> Entry<'a> {
                     .metadata()
                     .ok()
                     .and_then(|metadata| metadata.modified().ok())
-                    .and_then(|modified| sanitize_system_time(&modified).ok())
-                    .map(Cow::Owned)
+                    .map(|modified| Cow::Owned(sanitize_system_time(&modified)))
             })
     }
 
@@ -573,8 +571,7 @@ impl<'a> Entry<'a> {
                     .metadata()
                     .ok()
                     .and_then(|metadata| metadata.accessed().ok())
-                    .and_then(|accessed| sanitize_system_time(&accessed).ok())
-                    .map(Cow::Owned)
+                    .map(|accessed| Cow::Owned(sanitize_system_time(&accessed)))
             })
     }
 
@@ -644,17 +641,17 @@ impl EntryStatus {
         };
 
         let created = if index_flags.created {
-            Some(sanitize_system_time(&metadata.created()?)?)
+            Some(sanitize_system_time(&metadata.created()?))
         } else {
             None
         };
         let modified = if index_flags.modified {
-            Some(sanitize_system_time(&metadata.modified()?)?)
+            Some(sanitize_system_time(&metadata.modified()?))
         } else {
             None
         };
         let accessed = if index_flags.accessed {
-            Some(sanitize_system_time(&metadata.accessed()?)?)
+            Some(sanitize_system_time(&metadata.accessed()?))
         } else {
             None
         };
@@ -763,10 +760,14 @@ where
     sort_keys
 }
 
-fn sanitize_system_time(time: &SystemTime) -> Result<SystemTime> {
-    // metadata may contain invalid SystemTime
-    // it will catch them as Err instead of panic
-    Ok(SystemTime::UNIX_EPOCH + time.duration_since(SystemTime::UNIX_EPOCH)?)
+fn sanitize_system_time(time: &SystemTime) -> SystemTime {
+    // check for invalid SystemTime (e.g. older than unix epoch)
+    if let Ok(duration) = time.duration_since(SystemTime::UNIX_EPOCH) {
+        SystemTime::UNIX_EPOCH + duration
+    } else {
+        // defaults to unix epoch
+        SystemTime::UNIX_EPOCH
+    }
 }
 
 fn walk_file_system(
