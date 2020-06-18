@@ -121,7 +121,7 @@ impl<'a> TuiApp<'a> {
 
             let (matcher_tx, matcher_rx) = channel::unbounded();
             let (result_tx, result_rx) = channel::unbounded();
-            let searcher = Searcher::run(self.config, database, matcher_rx, result_tx)?;
+            let _searcher = Searcher::run(self.config, database, matcher_rx, result_tx)?;
 
             self.matcher_tx = Some(matcher_tx);
             self.on_query_change()?;
@@ -149,8 +149,6 @@ impl<'a> TuiApp<'a> {
                     }
                 }
             }
-
-            searcher.abort()?;
         }
 
         Ok(())

@@ -12,47 +12,30 @@ use std::io::BufReader;
 use std::path::Path;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
+use std::thread;
 
-pub struct Loader {
-    thread: Option<JoinHandle<()>>,
-}
-
-impl Drop for Loader {
-    fn drop(&mut self) {
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
+pub struct Loader;
 
 impl Loader {
     pub fn run<P>(db_path: P, tx: Sender<Result<Database>>) -> Result<Self>
     where
         P: 'static + AsRef<Path> + Send,
     {
-        let thread = thread::spawn(move || {
+        thread::spawn(move || {
             let _ = tx.send(load_database(db_path));
         });
 
-        let loader = Self {
-            thread: Some(thread),
-        };
-
-        Ok(loader)
+        Ok(Self)
     }
 }
 
 pub struct Searcher {
-    thread: Option<JoinHandle<()>>,
     stop_tx: Sender<()>,
 }
 
 impl Drop for Searcher {
     fn drop(&mut self) {
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        let _ = self.stop_tx.send(());
     }
 }
 
@@ -65,21 +48,11 @@ impl Searcher {
     ) -> Result<Self> {
         let (stop_tx, stop_rx) = channel::unbounded();
         let mut inner = SearcherImpl::new(config, database, rx, stop_rx, tx);
-
-        let thread = thread::spawn(move || {
+        thread::spawn(move || {
             let _ = inner.run();
         });
 
-        let searcher = Self {
-            thread: Some(thread),
-            stop_tx,
-        };
-
-        Ok(searcher)
-    }
-
-    pub fn abort(&self) -> Result<()> {
-        self.stop_tx.send(()).map_err(Into::into)
+        Ok(Self { stop_tx })
     }
 }
 
@@ -135,7 +108,7 @@ impl SearcherImpl {
 
                     let compare_func = build_compare_func(self.database.clone(), self.sort_by, self.sort_order, self.dirs_before_files);
 
-                    let thread = thread::spawn(move || {
+                    thread::spawn(move || {
                         let hits = {
                             let result = database.search(&matcher, aborted.clone());
                             result.map(|mut hits| {
@@ -155,7 +128,6 @@ impl SearcherImpl {
                     });
 
                     self.search.replace(Search {
-                        thread: Some(thread),
                         aborted: aborted_clone,
                     });
                 },
@@ -170,16 +142,7 @@ impl SearcherImpl {
 }
 
 struct Search {
-    thread: Option<JoinHandle<()>>,
     aborted: Arc<AtomicBool>,
-}
-
-impl Drop for Search {
-    fn drop(&mut self) {
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
 }
 
 impl Search {
