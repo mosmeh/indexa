@@ -224,7 +224,7 @@ impl<'a> TuiApp<'a> {
             }
         });
 
-        let items = self.hits.iter().map(|id| {
+        let display_func = |id: &EntryId| {
             let entry = self.database.as_ref().unwrap().entry(*id);
             let match_detail = self.matcher.as_ref().unwrap().match_detail(&entry).unwrap();
             let contents = columns
@@ -235,7 +235,7 @@ impl<'a> TuiApp<'a> {
                 })
                 .collect::<Vec<_>>();
             Row::new(contents.into_iter())
-        });
+        };
 
         let (num_fixed, sum_widths) =
             columns
@@ -269,8 +269,7 @@ impl<'a> TuiApp<'a> {
             })
             .collect::<Vec<_>>();
 
-        let table = Table::new(header, items)
-            .num_rows(self.hits.len())
+        let table = Table::new(header, self.hits.iter(), display_func)
             .widths(&widths)
             .alignments(&alignments)
             .selected_style(Style::default().fg(Color::Blue))
@@ -385,6 +384,20 @@ impl<'a> TuiApp<'a> {
             | (KeyModifiers::CONTROL, KeyCode::Char('c'))
             | (KeyModifiers::CONTROL, KeyCode::Char('g')) => return Ok(State::Aborted),
             (_, KeyCode::Enter) => return Ok(State::Accepted),
+            (_, KeyCode::Up)
+            | (KeyModifiers::CONTROL, KeyCode::Char('p'))
+            | (KeyModifiers::CONTROL, KeyCode::Char('k')) => self.on_up()?,
+            (_, KeyCode::Down)
+            | (KeyModifiers::CONTROL, KeyCode::Char('n'))
+            | (KeyModifiers::CONTROL, KeyCode::Char('j')) => self.on_down()?,
+            (_, KeyCode::PageUp) => self.on_pageup()?,
+            (_, KeyCode::PageDown) => self.on_pagedown()?,
+            (KeyModifiers::CONTROL, KeyCode::Home) | (KeyModifiers::SHIFT, KeyCode::Home) => {
+                self.on_scroll_to_top()?;
+            }
+            (KeyModifiers::CONTROL, KeyCode::End) | (KeyModifiers::SHIFT, KeyCode::End) => {
+                self.on_scroll_to_bottom()?;
+            }
             (_, KeyCode::Backspace) | (KeyModifiers::CONTROL, KeyCode::Char('h')) => {
                 if self.text_box_state.on_backspace() {
                     self.on_query_change()?;
@@ -411,14 +424,6 @@ impl<'a> TuiApp<'a> {
                 self.text_box_state.clear();
                 self.on_query_change()?;
             }
-            (_, KeyCode::Up)
-            | (KeyModifiers::CONTROL, KeyCode::Char('p'))
-            | (KeyModifiers::CONTROL, KeyCode::Char('k')) => self.on_up()?,
-            (_, KeyCode::Down)
-            | (KeyModifiers::CONTROL, KeyCode::Char('n'))
-            | (KeyModifiers::CONTROL, KeyCode::Char('j')) => self.on_down()?,
-            (_, KeyCode::PageUp) => self.on_pageup()?,
-            (_, KeyCode::PageDown) => self.on_pagedown()?,
             (_, KeyCode::Char(c)) => {
                 self.text_box_state.on_char(c);
                 self.on_query_change()?;
@@ -485,6 +490,22 @@ impl<'a> TuiApp<'a> {
                 (self.table_state.selected() + self.page_shift_amount as usize)
                     .min(self.hits.len() - 1),
             );
+        }
+
+        Ok(())
+    }
+
+    fn on_scroll_to_top(&mut self) -> Result<()> {
+        if !self.hits.is_empty() {
+            self.table_state.select(0);
+        }
+
+        Ok(())
+    }
+
+    fn on_scroll_to_bottom(&mut self) -> Result<()> {
+        if !self.hits.is_empty() {
+            self.table_state.select(self.hits.len() - 1);
         }
 
         Ok(())

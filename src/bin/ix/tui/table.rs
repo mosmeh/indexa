@@ -69,7 +69,7 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct Table<'a, H, R> {
+pub struct Table<'a, H, R, F> {
     block: Option<Block<'a>>,
     style: Style,
     header: H,
@@ -83,42 +83,19 @@ pub struct Table<'a, H, R> {
     selected_highlight_style: Style,
     selected_symbol: Option<&'a str>,
     rows: R,
-    num_rows: Option<usize>,
+    display_func: F,
 }
 
-impl<'a, H, R> Default for Table<'a, H, R>
-where
-    H: Iterator + Default,
-    R: Iterator + Default,
-{
-    fn default() -> Table<'a, H, R> {
-        Table {
-            block: None,
-            style: Style::default(),
-            header: H::default(),
-            header_style: Style::default(),
-            widths: &[],
-            alignments: None,
-            column_spacing: 1,
-            header_gap: 1,
-            selected_style: Style::default(),
-            highlight_style: Style::default(),
-            selected_highlight_style: Style::default(),
-            selected_symbol: None,
-            rows: R::default(),
-            num_rows: None,
-        }
-    }
-}
-impl<'a, H, R, M, D> Table<'a, H, R>
+impl<'a, H, R, M, D, F, T> Table<'a, H, R, F>
 where
     H: Iterator,
     H::Item: Display,
     M: Iterator<Item = Range<usize>>,
     D: Iterator<Item = HighlightableText<M>>,
-    R: Iterator<Item = Row<M, D>>,
+    R: ExactSizeIterator<Item = T>,
+    F: Fn(T) -> Row<M, D>,
 {
-    pub fn new(header: H, rows: R) -> Table<'a, H, R> {
+    pub fn new(header: H, rows: R, display_func: F) -> Table<'a, H, R, F> {
         Table {
             block: None,
             style: Style::default(),
@@ -133,18 +110,18 @@ where
             selected_highlight_style: Style::default(),
             selected_symbol: None,
             rows,
-            num_rows: None,
+            display_func,
         }
     }
 
     #[allow(dead_code)]
-    pub fn block(mut self, block: Block<'a>) -> Table<'a, H, R> {
+    pub fn block(mut self, block: Block<'a>) -> Table<'a, H, R, F> {
         self.block = Some(block);
         self
     }
 
     #[allow(dead_code)]
-    pub fn header<II>(mut self, header: II) -> Table<'a, H, R>
+    pub fn header<II>(mut self, header: II) -> Table<'a, H, R, F>
     where
         II: IntoIterator<Item = H::Item, IntoIter = H>,
     {
@@ -153,12 +130,12 @@ where
     }
 
     #[allow(dead_code)]
-    pub fn header_style(mut self, style: Style) -> Table<'a, H, R> {
+    pub fn header_style(mut self, style: Style) -> Table<'a, H, R, F> {
         self.header_style = style;
         self
     }
 
-    pub fn widths(mut self, widths: &'a [Constraint]) -> Table<'a, H, R> {
+    pub fn widths(mut self, widths: &'a [Constraint]) -> Table<'a, H, R, F> {
         let between_0_and_100 = |&w| match w {
             Constraint::Percentage(p) => p <= 100,
             _ => true,
@@ -171,71 +148,70 @@ where
         self
     }
 
-    pub fn alignments(mut self, alignments: &'a [Alignment]) -> Table<'a, H, R> {
+    pub fn alignments(mut self, alignments: &'a [Alignment]) -> Table<'a, H, R, F> {
         self.alignments = Some(alignments);
         self
     }
 
     #[allow(dead_code)]
-    pub fn rows<II>(mut self, rows: II) -> Table<'a, H, R>
+    pub fn rows<II>(mut self, rows: II) -> Table<'a, H, R, F>
     where
-        II: IntoIterator<Item = Row<M, D>, IntoIter = R>,
+        II: IntoIterator<Item = T, IntoIter = R>,
     {
         self.rows = rows.into_iter();
         self
     }
 
-    pub fn num_rows(mut self, num_rows: usize) -> Table<'a, H, R> {
-        self.num_rows = Some(num_rows);
-        self
-    }
-
     #[allow(dead_code)]
-    pub fn style(mut self, style: Style) -> Table<'a, H, R> {
+    pub fn style(mut self, style: Style) -> Table<'a, H, R, F> {
         self.style = style;
         self
     }
 
-    pub fn selected_symbol(mut self, selected_symbol: &'a str) -> Table<'a, H, R> {
+    pub fn selected_symbol(mut self, selected_symbol: &'a str) -> Table<'a, H, R, F> {
         self.selected_symbol = Some(selected_symbol);
         self
     }
 
-    pub fn selected_style(mut self, selected_style: Style) -> Table<'a, H, R> {
+    pub fn selected_style(mut self, selected_style: Style) -> Table<'a, H, R, F> {
         self.selected_style = selected_style;
         self
     }
 
-    pub fn highlight_style(mut self, highlight_style: Style) -> Table<'a, H, R> {
+    pub fn highlight_style(mut self, highlight_style: Style) -> Table<'a, H, R, F> {
         self.highlight_style = highlight_style;
         self
     }
 
-    pub fn selected_highlight_style(mut self, selected_highlight_style: Style) -> Table<'a, H, R> {
+    pub fn selected_highlight_style(
+        mut self,
+        selected_highlight_style: Style,
+    ) -> Table<'a, H, R, F> {
         self.selected_highlight_style = selected_highlight_style;
         self
     }
 
     #[allow(dead_code)]
-    pub fn column_spacing(mut self, spacing: u16) -> Table<'a, H, R> {
+    pub fn column_spacing(mut self, spacing: u16) -> Table<'a, H, R, F> {
         self.column_spacing = spacing;
         self
     }
 
     #[allow(dead_code)]
-    pub fn header_gap(mut self, gap: u16) -> Table<'a, H, R> {
+    pub fn header_gap(mut self, gap: u16) -> Table<'a, H, R, F> {
         self.header_gap = gap;
         self
     }
 }
 
-impl<'a, 'b, H, R, M, D> StatefulWidget for Table<'a, H, R>
+impl<'a, H, R, M, D, F, T> StatefulWidget for Table<'a, H, R, F>
 where
     H: Iterator,
     H::Item: Display,
     M: Iterator<Item = Range<usize>>,
     D: Iterator<Item = HighlightableText<M>>,
-    R: Iterator<Item = Row<M, D>>,
+    R: ExactSizeIterator<Item = T>,
+    F: Fn(T) -> Row<M, D>,
 {
     type State = TableState;
 
@@ -341,10 +317,7 @@ where
         if y < table_area.bottom() {
             let remaining = (table_area.bottom() - y) as usize;
 
-            if let Some(num_rows) = self.num_rows {
-                state.offset = state.offset.min(num_rows.saturating_sub(remaining));
-            }
-
+            state.offset = state.offset.min(self.rows.len().saturating_sub(remaining));
             state.offset = if state.selected >= remaining + state.offset - 1 {
                 state.selected + 1 - remaining
             } else if state.selected < state.offset {
@@ -353,7 +326,13 @@ where
                 state.offset
             };
 
-            for (i, row) in self.rows.skip(state.offset).take(remaining).enumerate() {
+            for (i, row) in self
+                .rows
+                .skip(state.offset)
+                .take(remaining)
+                .map(self.display_func)
+                .enumerate()
+            {
                 let (style, highlight_style, symbol) = {
                     if i == state.selected - state.offset {
                         (
@@ -408,13 +387,14 @@ where
     }
 }
 
-impl<'a, H, R, M, D> Widget for Table<'a, H, R>
+impl<'a, H, R, M, D, F, T> Widget for Table<'a, H, R, F>
 where
     H: Iterator,
     H::Item: Display,
     M: Iterator<Item = Range<usize>>,
     D: Iterator<Item = HighlightableText<M>>,
-    R: Iterator<Item = Row<M, D>>,
+    R: ExactSizeIterator<Item = T>,
+    F: Fn(T) -> Row<M, D>,
 {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut state = TableState::default();
