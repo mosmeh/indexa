@@ -155,7 +155,7 @@ impl Database {
         hits: &[AtomicBool],
         aborted: Arc<AtomicBool>,
     ) -> Result<()> {
-        (node.children_start..node.children_end)
+        (node.child_start..node.child_end)
             .into_par_iter()
             .try_for_each(|id| {
                 if aborted.load(Ordering::Relaxed) {
@@ -186,7 +186,7 @@ impl Database {
         hits: &[AtomicBool],
         aborted: Arc<AtomicBool>,
     ) -> Result<()> {
-        (node.children_start..node.children_end)
+        (node.child_start..node.child_end)
             .into_par_iter()
             .try_for_each(|id| {
                 if aborted.load(Ordering::Relaxed) {
@@ -196,7 +196,7 @@ impl Database {
                 hits[id as usize].store(true, Ordering::Relaxed);
 
                 let child = &self.entries[id as usize];
-                if child.is_dir && child.children_start < child.children_end {
+                if child.is_dir && child.child_start < child.child_end {
                     self.match_all_descendants(child, hits, aborted.clone())?;
                 }
 
@@ -204,29 +204,29 @@ impl Database {
             })
     }
 
-    fn push_entry(&mut self, precursor: EntryPrecursor, parent: u32) {
+    fn push_entry(&mut self, info: EntryInfo, parent: u32) {
         self.entries.push(EntryNode {
-            name: precursor.name,
+            name: info.name,
             parent,
-            children_start: u32::MAX,
-            children_end: u32::MAX,
-            is_dir: precursor.ftype.is_dir(),
+            child_start: u32::MAX,
+            child_end: u32::MAX,
+            is_dir: info.ftype.is_dir(),
         });
 
         if let Some(size) = &mut self.size {
-            size.push(precursor.status.size.unwrap());
+            size.push(info.status.size.unwrap());
         }
         if let Some(mode) = &mut self.mode {
-            mode.push(precursor.status.mode.unwrap());
+            mode.push(info.status.mode.unwrap());
         }
         if let Some(created) = &mut self.created {
-            created.push(precursor.status.created.unwrap());
+            created.push(info.status.created.unwrap());
         }
         if let Some(modified) = &mut self.modified {
-            modified.push(precursor.status.modified.unwrap());
+            modified.push(info.status.modified.unwrap());
         }
         if let Some(accessed) = &mut self.accessed {
-            accessed.push(precursor.status.accessed.unwrap());
+            accessed.push(info.status.accessed.unwrap());
         }
     }
 
@@ -379,21 +379,21 @@ impl DatabaseBuilder {
         dirs.dedup_by(|(_, a), (_, b)| a.starts_with(&b as &str));
 
         for (path, path_str) in &dirs {
-            let mut root_precursor = EntryPrecursor::from_path(&path, &self.index_flags)?;
-            if !root_precursor.ftype.is_dir() {
+            let mut root_info = EntryInfo::from_path(&path, &self.index_flags)?;
+            if !root_info.ftype.is_dir() {
                 continue;
             }
 
-            let dir_entries = mem::replace(&mut root_precursor.dir_entries, None).unwrap();
+            let dir_entries = mem::replace(&mut root_info.dir_entries, None).unwrap();
 
             let root_node_id = {
                 let mut db = database.lock().unwrap();
 
                 let root_node_id = db.entries.len() as u32;
                 db.push_entry(
-                    EntryPrecursor {
+                    EntryInfo {
                         name: path_str.to_string(),
-                        ..root_precursor
+                        ..root_info
                     },
                     root_node_id,
                 );
@@ -592,8 +592,8 @@ impl<'a> Entry<'a> {
 struct EntryNode {
     name: String,
     parent: u32,
-    children_start: u32,
-    children_end: u32,
+    child_start: u32,
+    child_end: u32,
     is_dir: bool,
 }
 
@@ -669,14 +669,14 @@ impl EntryStatus {
     }
 }
 
-struct EntryPrecursor {
+struct EntryInfo {
     name: String,
     ftype: FileType,
     status: EntryStatus,
     dir_entries: Option<Vec<io::Result<DirEntry>>>,
 }
 
-impl EntryPrecursor {
+impl EntryInfo {
     fn from_path(path: &Path, index_flags: &IndexFlags) -> Result<Self> {
         let name = if path.parent().is_some() {
             path.file_name().ok_or(Error::Filename)?.to_str()
@@ -778,39 +778,48 @@ fn walk_file_system(
     dir_entries: &[io::Result<DirEntry>],
     parent: u32,
 ) {
-    let children = dir_entries
+    let (mut child_dirs, child_files) = dir_entries
         .iter()
         .filter_map(|dent| {
             dent.as_ref().ok().and_then(|dent| {
                 if index_flags.ignore_hidden && is_hidden(dent) {
                     return None;
                 }
-                EntryPrecursor::from_dir_entry(&dent, index_flags).ok()
+                EntryInfo::from_dir_entry(&dent, index_flags).ok()
             })
         })
+        .partition::<Vec<_>, _>(|info| info.ftype.is_dir());
+
+    let sub_dir_entries = child_dirs
+        .iter_mut()
+        .map(|info| mem::replace(&mut info.dir_entries, None).unwrap())
         .collect::<Vec<_>>();
 
-    let mut sub_dirs = Vec::new();
-    {
+    let (dir_start, dir_end) = {
         let mut db = database.lock().unwrap();
 
-        db.entries[parent as usize].children_start = db.entries.len() as u32;
+        let child_start = db.entries.len() as u32;
+        let dir_end = child_start + child_dirs.len() as u32;
+        let child_end = dir_end + child_files.len() as u32;
 
-        for mut precursor in children {
-            if precursor.ftype.is_dir() {
-                let dir_entries = mem::replace(&mut precursor.dir_entries, None).unwrap();
-                sub_dirs.push((db.entries.len() as u32, dir_entries));
-            }
-            db.push_entry(precursor, parent);
+        db.entries[parent as usize].child_start = child_start;
+        db.entries[parent as usize].child_end = child_end;
+
+        for info in child_dirs {
+            db.push_entry(info, parent);
+        }
+        for info in child_files {
+            db.push_entry(info, parent);
         }
 
-        db.entries[parent as usize].children_end = db.entries.len() as u32;
-    }
+        (child_start, dir_end)
+    };
 
-    sub_dirs
-        .par_iter()
+    (dir_start..dir_end)
+        .into_par_iter()
+        .zip(sub_dir_entries.par_iter())
         .for_each_with(database, |database, (index, dir_entries)| {
-            walk_file_system(database.clone(), index_flags, dir_entries, *index);
+            walk_file_system(database.clone(), index_flags, &dir_entries, index);
         });
 }
 
