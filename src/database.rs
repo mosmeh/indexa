@@ -425,7 +425,9 @@ impl DatabaseBuilder {
         }
         if self.fast_sort_flags.extension {
             database.extension_sort_key = Some(generate_sort_keys(&database, |a, b| {
-                a.extension().cmp(&b.extension())
+                a.extension()
+                    .cmp(&b.extension())
+                    .then_with(|| a.basename().cmp(b.basename()))
             }));
         }
 
