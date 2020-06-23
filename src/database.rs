@@ -19,6 +19,7 @@ use strum_macros::Display;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
+    name_arena: String,
     entries: Vec<EntryNode>,
     root_ids: Vec<u32>,
     size: Option<Vec<u64>>,
@@ -77,7 +78,7 @@ impl Database {
                 return Some(Err(Error::SearchAbort));
             }
 
-            if query.regex().is_match(&node.name) {
+            if query.regex().is_match(&self.basename_from_node(node)) {
                 Some(Ok(EntryId(id)))
             } else {
                 None
@@ -99,7 +100,7 @@ impl Database {
             .tuple_windows()
         {
             let root_node = &self.entries[root_id as usize];
-            if query.regex().is_match(&root_node.name) {
+            if query.regex().is_match(&self.basename_from_node(root_node)) {
                 (root_id..next_root_id).into_par_iter().try_for_each(|id| {
                     if aborted.load(Ordering::Relaxed) {
                         return Err(Error::SearchAbort);
@@ -110,7 +111,7 @@ impl Database {
             } else {
                 self.match_path_impl(
                     root_node,
-                    Path::new(&root_node.name),
+                    Path::new(&self.basename_from_node(root_node)),
                     &query.regex(),
                     &hits,
                     aborted.clone(),
@@ -147,7 +148,7 @@ impl Database {
                 }
 
                 let child = &self.entries[id as usize];
-                let child_path = path.join(&child.name);
+                let child_path = path.join(&self.basename_from_node(child));
                 if let Some(s) = child_path.to_str() {
                     if regex.is_match(s) {
                         hits[id as usize].store(true, Ordering::Relaxed);
@@ -236,14 +237,17 @@ impl Database {
         }
     }
 
+    #[inline]
     fn push_entry(&mut self, info: EntryInfo, parent: u32) {
         self.entries.push(EntryNode {
-            name: info.name,
+            name_start: self.name_arena.len(),
+            name_len: info.name.len() as u16,
             parent,
             child_start: u32::MAX,
             child_end: u32::MAX,
             is_dir: info.ftype.is_dir(),
         });
+        self.name_arena.push_str(&info.name);
 
         if let Some(size) = &mut self.size {
             size.push(info.status.size.unwrap());
@@ -262,10 +266,16 @@ impl Database {
         }
     }
 
+    #[inline]
+    fn basename_from_node(&self, node: &EntryNode) -> &str {
+        &self.name_arena[node.name_start..node.name_start + node.name_len as usize]
+    }
+
+    #[inline]
     fn path_from_node(&self, node: &EntryNode) -> PathBuf {
         let mut buf = PathBuf::new();
         self.path_from_node_impl(node.parent, &mut buf);
-        buf.push(&node.name);
+        buf.push(&self.basename_from_node(node));
         buf
     }
 
@@ -273,17 +283,18 @@ impl Database {
         let dir = &self.entries[index as usize];
         if dir.parent == index {
             // root node
-            buf.push(&self.entries[dir.parent as usize].name);
+            buf.push(&self.basename_from_node(&self.entries[dir.parent as usize]));
         } else {
             self.path_from_node_impl(dir.parent, &mut buf);
         }
-        buf.push(&dir.name);
+        buf.push(&self.basename_from_node(dir));
     }
 
+    #[inline]
     fn path_vec_from_node<'a>(&'a self, node: &'a EntryNode) -> Vec<&'a str> {
         let mut buf = Vec::new();
         self.path_vec_from_node_impl(node.parent, &mut buf);
-        buf.push(&node.name);
+        buf.push(&self.basename_from_node(node));
         buf
     }
 
@@ -291,11 +302,11 @@ impl Database {
         let dir = &self.entries[index as usize];
         if dir.parent == index {
             // root node
-            buf.push(&self.entries[dir.parent as usize].name);
+            buf.push(&self.basename_from_node(&self.entries[dir.parent as usize]));
         } else {
             self.path_vec_from_node_impl(dir.parent, &mut buf);
         }
-        buf.push(&dir.name);
+        buf.push(&self.basename_from_node(dir));
     }
 }
 
@@ -370,6 +381,7 @@ impl DatabaseBuilder {
         }
 
         let database = Database {
+            name_arena: String::new(),
             entries: Vec::new(),
             root_ids: Vec::new(),
             size: if self.index_flags[StatusKind::Size] {
@@ -495,7 +507,7 @@ impl<'a> Entry<'a> {
 
     #[inline]
     pub fn basename(&self) -> &str {
-        &self.node().name
+        self.database.basename_from_node(self.node())
     }
 
     #[inline]
@@ -510,7 +522,7 @@ impl<'a> Entry<'a> {
             return None;
         }
 
-        let name = &node.name;
+        let name = self.database.basename_from_node(node);
         if name.contains('.') {
             name.split('.').last()
         } else {
@@ -605,10 +617,11 @@ impl<'a> Entry<'a> {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct EntryNode {
-    name: String,
+    name_start: usize,
     parent: u32,
     child_start: u32,
     child_end: u32,
+    name_len: u16,
     is_dir: bool,
 }
 
