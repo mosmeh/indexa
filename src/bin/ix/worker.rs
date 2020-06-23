@@ -1,12 +1,8 @@
-use crate::config::{Config, SortOrder};
-
-use indexa::database::{Database, Entry, EntryId, StatusKind};
-use indexa::matcher::Matcher;
+use indexa::database::{Database, EntryId};
+use indexa::query::Query;
 
 use anyhow::Result;
-use crossbeam::channel::{self, Receiver, Sender};
-use rayon::prelude::*;
-use std::cmp;
+use crossbeam_channel::{self, Receiver, Sender};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -41,13 +37,12 @@ impl Drop for Searcher {
 
 impl Searcher {
     pub fn run(
-        config: &Config,
         database: Arc<Database>,
-        rx: Receiver<Matcher>,
+        rx: Receiver<Query>,
         tx: Sender<Vec<EntryId>>,
     ) -> Result<Self> {
-        let (stop_tx, stop_rx) = channel::unbounded();
-        let mut inner = SearcherImpl::new(config, database, rx, stop_rx, tx);
+        let (stop_tx, stop_rx) = crossbeam_channel::bounded(1);
+        let mut inner = SearcherImpl::new(database, rx, stop_rx, tx);
         thread::spawn(move || {
             let _ = inner.run();
         });
@@ -57,11 +52,8 @@ impl Searcher {
 }
 
 struct SearcherImpl {
-    sort_by: StatusKind,
-    sort_order: SortOrder,
-    dirs_before_files: bool,
     database: Arc<Database>,
-    matcher_rx: Receiver<Matcher>,
+    query_rx: Receiver<Query>,
     stop_rx: Receiver<()>,
     tx: Sender<Vec<EntryId>>,
     search: Option<Search>,
@@ -69,18 +61,14 @@ struct SearcherImpl {
 
 impl SearcherImpl {
     fn new(
-        config: &Config,
         database: Arc<Database>,
-        matcher_rx: Receiver<Matcher>,
+        query_rx: Receiver<Query>,
         stop_rx: Receiver<()>,
         tx: Sender<Vec<EntryId>>,
     ) -> Self {
         Self {
-            sort_by: config.ui.sort_by,
-            sort_order: config.ui.sort_order,
-            dirs_before_files: config.ui.dirs_before_files,
             database,
-            matcher_rx,
+            query_rx,
             stop_rx,
             tx,
             search: None,
@@ -89,14 +77,14 @@ impl SearcherImpl {
 
     fn run(&mut self) -> Result<()> {
         loop {
-            channel::select! {
-                recv(self.matcher_rx) -> matcher => {
+            crossbeam_channel::select! {
+                recv(self.query_rx) -> query => {
                     if let Some(search) = &self.search {
                         search.abort();
                     }
 
-                    let matcher = matcher?;
-                    if matcher.query_is_empty() {
+                    let query = query?;
+                    if query.is_empty() {
                         let _ = self.tx.send(Vec::new());
                         continue;
                     }
@@ -106,22 +94,10 @@ impl SearcherImpl {
                     let aborted = Arc::new(AtomicBool::new(false));
                     let aborted_clone = aborted.clone();
 
-                    let compare_func = build_compare_func(self.database.clone(), self.sort_by, self.sort_order, self.dirs_before_files);
-
                     thread::spawn(move || {
-                        let hits = {
-                            let result = database.search(&matcher, aborted.clone());
-                            result.map(|mut hits| {
-                                hits.as_parallel_slice_mut()
-                                    .par_sort_unstable_by(|a, b| {
-                                        compare_func(&database.entry(*a), &database.entry(*b))
-                                    });
-                                hits
-                            })
-                        };
-                        if !aborted.load(atomic::Ordering::Relaxed) {
-                            aborted.store(true, atomic::Ordering::Relaxed);
-                            if let Ok(hits) = hits {
+                        let hits = database.search(&query, aborted.clone());
+                        if let Ok(hits) = hits {
+                            if !aborted.load(atomic::Ordering::Relaxed) {
                                 let _ = tx_clone.send(hits);
                             }
                         }
@@ -158,48 +134,4 @@ where
     let reader = BufReader::new(File::open(&db_path)?);
     let db: Database = bincode::deserialize_from(reader)?;
     Ok(db)
-}
-
-fn build_compare_func(
-    database: Arc<Database>,
-    sort_by: StatusKind,
-    sort_order: SortOrder,
-    dirs_before_files: bool,
-) -> Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> {
-    let cmp_file_dir: Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> =
-        if dirs_before_files {
-            Box::new(move |a, b| b.is_dir().cmp(&a.is_dir()))
-        } else {
-            Box::new(move |_, _| cmp::Ordering::Equal)
-        };
-
-    // 1. (optional) sort directories before files
-    // 2. tiebreak by basename
-    // 3. (optional) reverse
-    match sort_order {
-        SortOrder::Ascending => Box::new(move |a, b| {
-            cmp_file_dir(a, b).then_with(|| {
-                database
-                    .fast_compare(sort_by, &a, &b)
-                    .unwrap_or(cmp::Ordering::Equal)
-                    .then_with(|| {
-                        database
-                            .fast_compare(StatusKind::Basename, a, b)
-                            .unwrap_or(cmp::Ordering::Equal)
-                    })
-            })
-        }),
-        SortOrder::Descending => Box::new(move |a, b| {
-            cmp_file_dir(a, b).then_with(|| {
-                database
-                    .fast_compare(sort_by, &b, &a)
-                    .unwrap_or(cmp::Ordering::Equal)
-                    .then_with(|| {
-                        database
-                            .fast_compare(StatusKind::Basename, b, a)
-                            .unwrap_or(cmp::Ordering::Equal)
-                    })
-            })
-        }),
-    }
 }

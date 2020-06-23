@@ -2,12 +2,12 @@
 auto_match_path = true
 
 [database]
-location = "database"
 index = [
     "size",
     "mode",
     "modified"
 ]
+fast_sort = ["modified"]
 
 [ui]
 sort_by = "modified"

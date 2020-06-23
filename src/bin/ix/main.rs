@@ -2,7 +2,7 @@ mod config;
 mod tui;
 mod worker;
 
-use indexa::database::{DatabaseBuilder, StatusKind};
+use indexa::database::DatabaseBuilder;
 
 use anyhow::{anyhow, Result};
 use rayon::ThreadPoolBuilder;
@@ -60,9 +60,6 @@ fn main() -> Result<()> {
     let mut config = config::read_or_create_config(opt.config.as_ref())?;
     config.flags.merge_opt(&opt);
 
-    // implicitly index basename
-    config.database.index.push(StatusKind::Basename);
-
     let db_location = if let Some(location) = &config.database.location {
         location
     } else {
@@ -91,7 +88,10 @@ fn main() -> Result<()> {
             db_builder.add_dir(&dir);
         }
         for kind in &config.database.index {
-            db_builder.add_status(*kind);
+            db_builder.index(*kind);
+        }
+        for kind in &config.database.fast_sort {
+            db_builder.fast_sort(*kind);
         }
 
         let database = db_builder

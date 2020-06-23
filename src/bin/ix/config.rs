@@ -1,6 +1,7 @@
 use crate::Opt;
 
 use indexa::database::StatusKind;
+use indexa::query::SortOrder;
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,7 @@ impl FlagConfig {
 pub struct DatabaseConfig {
     pub location: Option<PathBuf>,
     pub index: Vec<StatusKind>,
+    pub fast_sort: Vec<StatusKind>,
     pub dirs: Vec<PathBuf>,
     pub ignore_hidden: bool,
 }
@@ -89,7 +91,12 @@ impl Default for DatabaseConfig {
 
         Self {
             location,
-            index: Vec::new(),
+            index: vec![
+                StatusKind::Basename,
+                StatusKind::FullPath,
+                StatusKind::Extension,
+            ],
+            fast_sort: vec![StatusKind::Basename],
             dirs,
             ignore_hidden: false,
         }
@@ -166,13 +173,6 @@ impl Default for UIConfigWindows {
 pub struct Column {
     pub status: StatusKind,
     pub width: Option<u16>,
-}
-
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SortOrder {
-    Ascending,
-    Descending,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -7,6 +7,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error(transparent)]
     RegexBuild(#[from] regex::Error),
+    #[error("{0}")]
+    InvalidOption(String),
     #[error("Invalid UTF-8 sequence")]
     Utf8,
     #[error("Invalid filename")]

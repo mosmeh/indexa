@@ -1,8 +1,10 @@
-use crate::matcher::Matcher;
 use crate::mode::Mode;
+use crate::query::{Query, SortOrder};
 use crate::{Error, Result};
+use enum_map::{enum_map, Enum, EnumMap};
 use itertools::Itertools;
 use rayon::prelude::*;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp;
@@ -19,26 +21,24 @@ use std::time::SystemTime;
 pub struct Database {
     entries: Vec<EntryNode>,
     root_ids: Vec<u32>,
-    basename_sort_key: Option<Vec<u32>>,
-    path_sort_key: Option<Vec<u32>>,
-    extension_sort_key: Option<Vec<u32>>,
     size: Option<Vec<u64>>,
     mode: Option<Vec<Mode>>,
     created: Option<Vec<SystemTime>>,
     modified: Option<Vec<SystemTime>>,
     accessed: Option<Vec<SystemTime>>,
+    sorted_ids: EnumMap<StatusKind, Option<Vec<u32>>>,
 }
 
 impl Database {
+    #[inline]
     pub fn num_entries(&self) -> usize {
         self.entries.len()
     }
 
+    #[inline]
     pub fn is_indexed(&self, kind: StatusKind) -> bool {
         match kind {
-            StatusKind::Basename => self.basename_sort_key.is_some(),
-            StatusKind::FullPath => self.path_sort_key.is_some(),
-            StatusKind::Extension => self.extension_sort_key.is_some(),
+            StatusKind::Basename | StatusKind::FullPath | StatusKind::Extension => true,
             StatusKind::Size => self.size.is_some(),
             StatusKind::Mode => self.mode.is_some(),
             StatusKind::Created => self.created.is_some(),
@@ -47,11 +47,16 @@ impl Database {
         }
     }
 
-    pub fn search(&self, matcher: &Matcher, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
-        if matcher.match_path {
-            self.match_path(matcher, aborted)
+    #[inline]
+    pub fn is_fast_sortable(&self, kind: StatusKind) -> bool {
+        self.sorted_ids[kind].is_some()
+    }
+
+    pub fn search(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+        if query.match_path() {
+            self.match_path(query, aborted)
         } else {
-            self.match_basename(matcher, aborted)
+            self.match_basename(query, aborted)
         }
     }
 
@@ -60,54 +65,21 @@ impl Database {
         Entry { database: self, id }
     }
 
-    /// Compares two entries by specified status using indexed information.
-    ///
-    /// Returns `None` if it cannot perform the fast comparison by specified status.
-    #[inline]
-    pub fn fast_compare(
-        &self,
-        kind: StatusKind,
-        a: &Entry<'_>,
-        b: &Entry<'_>,
-    ) -> Option<cmp::Ordering> {
-        match kind {
-            StatusKind::Basename => Database::compare_entries(&self.basename_sort_key, a, b),
-            StatusKind::FullPath => Database::compare_entries(&self.path_sort_key, a, b),
-            StatusKind::Extension => Database::compare_entries(&self.extension_sort_key, a, b),
-            StatusKind::Size => Database::compare_entries(&self.size, a, b),
-            StatusKind::Mode => Database::compare_entries(&self.mode, a, b),
-            StatusKind::Created => Database::compare_entries(&self.created, a, b),
-            StatusKind::Modified => Database::compare_entries(&self.modified, a, b),
-            StatusKind::Accessed => Database::compare_entries(&self.accessed, a, b),
-        }
+    fn match_basename(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+        self.collect_hits(query, |(id, node)| {
+            if aborted.load(Ordering::Relaxed) {
+                return Some(Err(Error::SearchAbort));
+            }
+
+            if query.regex().is_match(&node.name) {
+                Some(Ok(EntryId(id)))
+            } else {
+                None
+            }
+        })
     }
 
-    #[inline]
-    fn compare_entries<T>(key: &Option<Vec<T>>, a: &Entry, b: &Entry) -> Option<cmp::Ordering>
-    where
-        T: Ord,
-    {
-        key.as_ref()
-            .map(|x| x[a.id.0 as usize].cmp(&x[b.id.0 as usize]))
-    }
-
-    fn match_basename(&self, matcher: &Matcher, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
-        (0..self.entries.len() as u32)
-            .into_par_iter()
-            .zip(self.entries.par_iter())
-            .filter_map(|(i, node)| {
-                if aborted.load(Ordering::Relaxed) {
-                    Some(Err(Error::SearchAbort))
-                } else if matcher.query.is_match(&node.name) {
-                    Some(Ok(EntryId(i)))
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    fn match_path(&self, matcher: &Matcher, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+    fn match_path(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
         let mut hits = Vec::with_capacity(self.entries.len());
         for _ in 0..self.entries.len() {
             hits.push(AtomicBool::new(false));
@@ -121,7 +93,7 @@ impl Database {
             .tuple_windows()
         {
             let root_node = &self.entries[root_id as usize];
-            if matcher.query.is_match(&root_node.name) {
+            if query.regex().is_match(&root_node.name) {
                 (root_id..next_root_id).into_par_iter().try_for_each(|id| {
                     if aborted.load(Ordering::Relaxed) {
                         return Err(Error::SearchAbort);
@@ -133,25 +105,31 @@ impl Database {
                 self.match_path_impl(
                     root_node,
                     Path::new(&root_node.name),
-                    matcher,
+                    &query.regex(),
                     &hits,
                     aborted.clone(),
                 )?;
             }
         }
 
-        Ok((0..self.entries.len() as u32)
-            .into_par_iter()
-            .filter(|id| hits[*id as usize].load(Ordering::Relaxed))
-            .map(EntryId)
-            .collect())
+        self.collect_hits(query, |(id, _)| {
+            if aborted.load(Ordering::Relaxed) {
+                return Some(Err(Error::SearchAbort));
+            }
+
+            if hits[id as usize].load(Ordering::Relaxed) {
+                Some(Ok(EntryId(id)))
+            } else {
+                None
+            }
+        })
     }
 
     fn match_path_impl(
         &self,
         node: &EntryNode,
         path: &Path,
-        matcher: &Matcher,
+        regex: &Regex,
         hits: &[AtomicBool],
         aborted: Arc<AtomicBool>,
     ) -> Result<()> {
@@ -165,14 +143,14 @@ impl Database {
                 let child = &self.entries[id as usize];
                 let child_path = path.join(&child.name);
                 if let Some(s) = child_path.to_str() {
-                    if matcher.query.is_match(s) {
+                    if regex.is_match(s) {
                         hits[id as usize].store(true, Ordering::Relaxed);
 
-                        if child.is_dir {
+                        if child.has_any_child() {
                             self.match_all_descendants(child, hits, aborted.clone())?;
                         }
-                    } else if child.is_dir {
-                        self.match_path_impl(child, &child_path, matcher, hits, aborted.clone())?;
+                    } else if child.has_any_child() {
+                        self.match_path_impl(child, &child_path, regex, hits, aborted.clone())?;
                     }
                 }
 
@@ -196,12 +174,60 @@ impl Database {
                 hits[id as usize].store(true, Ordering::Relaxed);
 
                 let child = &self.entries[id as usize];
-                if child.is_dir && child.child_start < child.child_end {
+                if child.has_any_child() {
                     self.match_all_descendants(child, hits, aborted.clone())?;
                 }
 
                 Ok(())
             })
+    }
+
+    fn collect_hits<F>(&self, query: &Query, func: F) -> Result<Vec<EntryId>>
+    where
+        F: Fn((u32, &EntryNode)) -> Option<Result<EntryId>> + Send + Sync,
+    {
+        let hits: Result<Vec<_>> = if self.is_fast_sortable(query.sort_by()) {
+            let iter = self.sorted_ids[query.sort_by()]
+                .as_ref()
+                .unwrap()
+                .par_iter()
+                .map(|id| (*id, &self.entries[*id as usize]));
+            match query.sort_order() {
+                SortOrder::Ascending => iter.filter_map(func).collect(),
+                SortOrder::Descending => iter.rev().filter_map(func).collect(),
+            }
+        } else {
+            let mut v = (0..self.entries.len() as u32)
+                .into_par_iter()
+                .zip(self.entries.par_iter())
+                .filter_map(func)
+                .collect::<Result<Vec<_>>>()?;
+
+            let compare_func = build_compare_func(query.sort_by());
+            match query.sort_order() {
+                SortOrder::Ascending => v
+                    .as_parallel_slice_mut()
+                    .par_sort_unstable_by(|a, b| compare_func(&self.entry(*a), &self.entry(*b))),
+                SortOrder::Descending => v
+                    .as_parallel_slice_mut()
+                    .par_sort_unstable_by(|a, b| compare_func(&self.entry(*b), &self.entry(*a))),
+            };
+
+            Ok(v)
+        };
+
+        if query.dirs_before_files() {
+            hits.map(|mut hits| {
+                hits.as_parallel_slice_mut().par_sort_by(|a, b| {
+                    self.entries[b.0 as usize]
+                        .is_dir
+                        .cmp(&self.entries[a.0 as usize].is_dir)
+                });
+                hits
+            })
+        } else {
+            hits
+        }
     }
 
     fn push_entry(&mut self, info: EntryInfo, parent: u32) {
@@ -269,27 +295,36 @@ impl Database {
 
 pub struct DatabaseBuilder {
     dirs: Vec<PathBuf>,
-    index_flags: IndexFlags,
-    fast_sort_flags: FastSortFlags,
+    index_flags: StatusFlags,
+    fast_sort_flags: StatusFlags,
+    ignore_hidden: bool,
 }
 
 impl Default for DatabaseBuilder {
     fn default() -> Self {
         Self {
             dirs: Vec::new(),
-            index_flags: IndexFlags {
-                size: false,
-                mode: false,
-                created: false,
-                modified: false,
-                accessed: false,
-                ignore_hidden: false,
+            index_flags: enum_map! {
+                StatusKind::Basename => true,
+                StatusKind::FullPath => true,
+                StatusKind::Extension => true,
+                StatusKind::Size => false,
+                StatusKind::Mode => false,
+                StatusKind::Created => false,
+                StatusKind::Modified => false,
+                StatusKind::Accessed => false,
             },
-            fast_sort_flags: FastSortFlags {
-                basename: true,
-                path: false,
-                extension: false,
+            fast_sort_flags: enum_map! {
+                StatusKind::Basename => true,
+                StatusKind::FullPath => false,
+                StatusKind::Extension => false,
+                StatusKind::Size => false,
+                StatusKind::Mode => false,
+                StatusKind::Created => false,
+                StatusKind::Modified => false,
+                StatusKind::Accessed => false,
             },
+            ignore_hidden: false,
         }
     }
 }
@@ -304,57 +339,59 @@ impl DatabaseBuilder {
         self
     }
 
-    pub fn add_status(&mut self, kind: StatusKind) -> &mut Self {
-        match kind {
-            StatusKind::Basename => self.fast_sort_flags.basename = true,
-            StatusKind::FullPath => self.fast_sort_flags.path = true,
-            StatusKind::Extension => self.fast_sort_flags.extension = true,
-            StatusKind::Size => self.index_flags.size = true,
-            StatusKind::Mode => self.index_flags.mode = true,
-            StatusKind::Created => self.index_flags.created = true,
-            StatusKind::Modified => self.index_flags.modified = true,
-            StatusKind::Accessed => self.index_flags.accessed = true,
-        };
+    pub fn index(&mut self, kind: StatusKind) -> &mut Self {
+        self.index_flags[kind] = true;
+        self
+    }
+
+    pub fn fast_sort(&mut self, kind: StatusKind) -> &mut Self {
+        self.fast_sort_flags[kind] = true;
         self
     }
 
     pub fn ignore_hidden(&mut self, yes: bool) -> &mut Self {
-        self.index_flags.ignore_hidden = yes;
+        self.ignore_hidden = yes;
         self
     }
 
     pub fn build(&self) -> Result<Database> {
+        for (kind, enabled) in self.fast_sort_flags {
+            if enabled && !self.index_flags[kind] {
+                return Err(Error::InvalidOption(
+                    "Fast sorting cannot be enabled for a non-indexed status.".to_string(),
+                ));
+            }
+        }
+
         let database = Database {
             entries: Vec::new(),
             root_ids: Vec::new(),
-            size: if self.index_flags.size {
+            size: if self.index_flags[StatusKind::Size] {
                 Some(Vec::new())
             } else {
                 None
             },
-            mode: if self.index_flags.mode {
+            mode: if self.index_flags[StatusKind::Mode] {
                 Some(Vec::new())
             } else {
                 None
             },
-            created: if self.index_flags.created {
+            created: if self.index_flags[StatusKind::Created] {
                 Some(Vec::new())
             } else {
                 None
             },
-            modified: if self.index_flags.modified {
+            modified: if self.index_flags[StatusKind::Modified] {
                 Some(Vec::new())
             } else {
                 None
             },
-            accessed: if self.index_flags.accessed {
+            accessed: if self.index_flags[StatusKind::Accessed] {
                 Some(Vec::new())
             } else {
                 None
             },
-            basename_sort_key: None,
-            path_sort_key: None,
-            extension_sort_key: None,
+            sorted_ids: EnumMap::new(),
         };
 
         let database = Arc::new(Mutex::new(database));
@@ -405,6 +442,7 @@ impl DatabaseBuilder {
             walk_file_system(
                 database.clone(),
                 &self.index_flags,
+                self.ignore_hidden,
                 &dir_entries,
                 root_node_id,
             );
@@ -413,29 +451,14 @@ impl DatabaseBuilder {
         // safe to unwrap since above codes are the only users of database at the moment
         let mut database = Arc::try_unwrap(database).unwrap().into_inner().unwrap();
 
-        if self.fast_sort_flags.basename {
-            database.basename_sort_key = Some(generate_sort_keys(&database, |a, b| {
-                a.basename().cmp(b.basename())
-            }));
-        }
-        if self.fast_sort_flags.path {
-            database.path_sort_key = Some(generate_sort_keys(&database, |a, b| {
-                a.path_vec().cmp(&b.path_vec())
-            }));
-        }
-        if self.fast_sort_flags.extension {
-            database.extension_sort_key = Some(generate_sort_keys(&database, |a, b| {
-                a.extension()
-                    .cmp(&b.extension())
-                    .then_with(|| a.basename().cmp(b.basename()))
-            }));
-        }
+        database.sorted_ids =
+            generate_sorted_ids(&database, &self.index_flags, &self.fast_sort_flags);
 
         Ok(database)
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Enum)]
 #[serde(rename_all = "lowercase")]
 pub enum StatusKind {
     Basename,
@@ -597,20 +620,14 @@ struct EntryNode {
     is_dir: bool,
 }
 
-struct IndexFlags {
-    size: bool,
-    mode: bool,
-    created: bool,
-    modified: bool,
-    accessed: bool,
-    ignore_hidden: bool,
+impl EntryNode {
+    #[inline]
+    fn has_any_child(&self) -> bool {
+        self.child_start < self.child_end
+    }
 }
 
-struct FastSortFlags {
-    basename: bool,
-    path: bool,
-    extension: bool,
-}
+type StatusFlags = EnumMap<StatusKind, bool>;
 
 struct EntryStatus {
     size: Option<u64>,
@@ -621,8 +638,8 @@ struct EntryStatus {
 }
 
 impl EntryStatus {
-    fn from_metadata(metadata: &Metadata, index_flags: &IndexFlags) -> Result<Self> {
-        let size = if index_flags.size {
+    fn from_metadata(metadata: &Metadata, index_flags: &StatusFlags) -> Result<Self> {
+        let size = if index_flags[StatusKind::Size] {
             Some(metadata.len())
         } else {
             None
@@ -634,25 +651,25 @@ impl EntryStatus {
     fn from_metadata_with_size(
         size: Option<u64>,
         metadata: &Metadata,
-        index_flags: &IndexFlags,
+        index_flags: &StatusFlags,
     ) -> Result<Self> {
-        let mode = if index_flags.mode {
+        let mode = if index_flags[StatusKind::Mode] {
             Some(metadata.into())
         } else {
             None
         };
 
-        let created = if index_flags.created {
+        let created = if index_flags[StatusKind::Created] {
             Some(sanitize_system_time(&metadata.created()?))
         } else {
             None
         };
-        let modified = if index_flags.modified {
+        let modified = if index_flags[StatusKind::Modified] {
             Some(sanitize_system_time(&metadata.modified()?))
         } else {
             None
         };
-        let accessed = if index_flags.accessed {
+        let accessed = if index_flags[StatusKind::Accessed] {
             Some(sanitize_system_time(&metadata.accessed()?))
         } else {
             None
@@ -677,7 +694,7 @@ struct EntryInfo {
 }
 
 impl EntryInfo {
-    fn from_path(path: &Path, index_flags: &IndexFlags) -> Result<Self> {
+    fn from_path(path: &Path, index_flags: &StatusFlags) -> Result<Self> {
         let name = if path.parent().is_some() {
             path.file_name().ok_or(Error::Filename)?.to_str()
         } else {
@@ -712,7 +729,7 @@ impl EntryInfo {
         }
     }
 
-    fn from_dir_entry(dent: &DirEntry, index_flags: &IndexFlags) -> Result<Self> {
+    fn from_dir_entry(dent: &DirEntry, index_flags: &StatusFlags) -> Result<Self> {
         let name = dent.file_name().to_str().ok_or(Error::Utf8)?.to_string();
         let ftype = dent.file_type()?;
 
@@ -743,23 +760,66 @@ impl EntryInfo {
     }
 }
 
-fn generate_sort_keys<F>(database: &Database, compare_func: F) -> Vec<u32>
-where
-    F: Fn(&Entry, &Entry) -> std::cmp::Ordering + Send + Sync,
-{
-    let mut indices = (0..database.entries.len() as u32).collect::<Vec<_>>();
-    indices
-        .as_parallel_slice_mut()
-        .par_sort_unstable_by(|a, b| {
-            compare_func(&database.entry(EntryId(*a)), &database.entry(EntryId(*b)))
-        });
+fn generate_sorted_ids(
+    database: &Database,
+    index_flags: &StatusFlags,
+    fast_sort_flags: &StatusFlags,
+) -> EnumMap<StatusKind, Option<Vec<u32>>> {
+    let mut sorted_ids = EnumMap::new();
+    for (kind, key) in sorted_ids.iter_mut() {
+        if index_flags[kind] && fast_sort_flags[kind] {
+            let compare_func = build_compare_func(kind);
 
-    let mut sort_keys = vec![0; indices.len()];
-    for (i, x) in indices.iter().enumerate() {
-        sort_keys[*x as usize] = i as u32;
+            let mut indices = (0..database.entries.len() as u32).collect::<Vec<_>>();
+            indices
+                .as_parallel_slice_mut()
+                .par_sort_unstable_by(|a, b| {
+                    compare_func(&database.entry(EntryId(*a)), &database.entry(EntryId(*b)))
+                });
+
+            *key = Some(indices);
+        }
     }
+    sorted_ids
+}
 
-    sort_keys
+fn build_compare_func(
+    kind: StatusKind,
+) -> Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> {
+    match kind {
+        StatusKind::Basename => Box::new(|a, b| a.basename().cmp(b.basename())),
+        StatusKind::FullPath => Box::new(|a, b| a.path_vec().cmp(&b.path_vec())),
+        StatusKind::Extension => Box::new(|a, b| {
+            a.extension()
+                .cmp(&b.extension())
+                .then_with(|| a.basename().cmp(b.basename()))
+        }),
+        StatusKind::Size => Box::new(|a, b| {
+            a.size()
+                .cmp(&b.size())
+                .then_with(|| a.basename().cmp(b.basename()))
+        }),
+        StatusKind::Mode => Box::new(|a, b| {
+            a.mode()
+                .cmp(&b.mode())
+                .then_with(|| a.basename().cmp(b.basename()))
+        }),
+        StatusKind::Created => Box::new(|a, b| {
+            a.created()
+                .cmp(&b.created())
+                .then_with(|| a.basename().cmp(b.basename()))
+        }),
+        StatusKind::Modified => Box::new(|a, b| {
+            a.modified()
+                .cmp(&b.modified())
+                .then_with(|| a.basename().cmp(b.basename()))
+        }),
+        StatusKind::Accessed => Box::new(|a, b| {
+            a.accessed()
+                .cmp(&b.accessed())
+                .then_with(|| a.basename().cmp(b.basename()))
+        }),
+    }
 }
 
 fn sanitize_system_time(time: &SystemTime) -> SystemTime {
@@ -774,7 +834,8 @@ fn sanitize_system_time(time: &SystemTime) -> SystemTime {
 
 fn walk_file_system(
     database: Arc<Mutex<Database>>,
-    index_flags: &IndexFlags,
+    index_flags: &StatusFlags,
+    ignore_hidden: bool,
     dir_entries: &[io::Result<DirEntry>],
     parent: u32,
 ) {
@@ -782,7 +843,7 @@ fn walk_file_system(
         .iter()
         .filter_map(|dent| {
             dent.as_ref().ok().and_then(|dent| {
-                if index_flags.ignore_hidden && is_hidden(dent) {
+                if ignore_hidden && is_hidden(dent) {
                     return None;
                 }
                 EntryInfo::from_dir_entry(&dent, index_flags).ok()
@@ -819,12 +880,19 @@ fn walk_file_system(
         .into_par_iter()
         .zip(sub_dir_entries.par_iter())
         .for_each_with(database, |database, (index, dir_entries)| {
-            walk_file_system(database.clone(), index_flags, &dir_entries, index);
+            walk_file_system(
+                database.clone(),
+                index_flags,
+                ignore_hidden,
+                &dir_entries,
+                index,
+            );
         });
 }
 
 // taken from https://github.com/BurntSushi/ripgrep/blob/1b2c1dc67583d70d1d16fc93c90db80bead4fb09/crates/ignore/src/pathutil.rs#L6-L46
 #[cfg(unix)]
+#[inline]
 fn is_hidden(dent: &DirEntry) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
@@ -836,6 +904,7 @@ fn is_hidden(dent: &DirEntry) -> bool {
 }
 
 #[cfg(windows)]
+#[inline]
 fn is_hidden(dent: &DirEntry) -> bool {
     if let Ok(metadata) = dent.metadata() {
         if Mode::from(&metadata).is_hidden() {

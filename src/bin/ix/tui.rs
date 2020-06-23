@@ -1,20 +1,20 @@
 mod table;
 mod text_box;
 
-use crate::config::{Config, SortOrder};
+use crate::config::Config;
 use crate::worker::{Loader, Searcher};
 
 use table::{HighlightableText, Row, Table, TableState};
 use text_box::{TextBox, TextBoxState};
 
 use indexa::database::{Database, Entry, EntryId, StatusKind};
-use indexa::matcher::{MatchDetail, Matcher, MatcherBuilder};
 use indexa::mode::Mode;
+use indexa::query::{MatchDetail, Query, QueryBuilder, SortOrder};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use chrono::offset::Local;
 use chrono::DateTime;
-use crossbeam::channel::{self, Sender};
+use crossbeam_channel::{self, Sender};
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
     MouseEvent,
@@ -48,10 +48,10 @@ enum State {
 struct TuiApp<'a> {
     config: &'a Config,
     database: Option<Arc<Database>>,
-    matcher: Option<Matcher>,
+    query: Option<Query>,
     hits: Vec<EntryId>,
     search_in_progress: bool,
-    matcher_tx: Option<Sender<Matcher>>,
+    query_tx: Option<Sender<Query>>,
     text_box_state: TextBoxState,
     table_state: TableState,
     page_shift_amount: u16,
@@ -62,10 +62,10 @@ impl<'a> TuiApp<'a> {
         let app = Self {
             config,
             database: None,
-            matcher: None,
+            query: None,
             hits: Vec::new(),
             search_in_progress: false,
-            matcher_tx: None,
+            query_tx: None,
             text_box_state: TextBoxState::with_text(
                 config.flags.query.clone().unwrap_or_else(|| "".to_string()),
             ),
@@ -77,13 +77,13 @@ impl<'a> TuiApp<'a> {
     }
 
     fn run(&mut self) -> Result<()> {
-        let (load_tx, load_rx) = channel::unbounded();
+        let (load_tx, load_rx) = crossbeam_channel::bounded(1);
         let db_path = self.config.database.location.as_ref().unwrap().clone();
         let _loader = Loader::run(db_path, load_tx)?;
 
         let mut terminal = setup_terminal()?;
 
-        let (input_tx, input_rx) = channel::unbounded();
+        let (input_tx, input_rx) = crossbeam_channel::unbounded();
         thread::spawn(move || loop {
             if let Ok(event) = event::read() {
                 let _ = input_tx.send(event);
@@ -93,7 +93,7 @@ impl<'a> TuiApp<'a> {
         let database = loop {
             let terminal_width = terminal.size()?.width;
             terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
-            channel::select! {
+            crossbeam_channel::select! {
                 recv(load_rx) -> database => break Some(database??),
                 recv(input_rx) -> event => {
                     match self.handle_input(event?)? {
@@ -108,28 +108,20 @@ impl<'a> TuiApp<'a> {
         };
 
         if let Some(database) = database {
-            if !database.is_indexed(self.config.ui.sort_by) {
-                cleanup_terminal(&mut terminal)?;
-                return Err(anyhow!(
-                    "You cannot sort by a non-indexed status. \
-                Please edit the config file and/or update the database."
-                ));
-            }
-
             let database = Arc::new(database);
             self.database = Some(Arc::clone(&database));
 
-            let (matcher_tx, matcher_rx) = channel::unbounded();
-            let (result_tx, result_rx) = channel::unbounded();
-            let _searcher = Searcher::run(self.config, database, matcher_rx, result_tx)?;
+            let (query_tx, query_rx) = crossbeam_channel::unbounded();
+            let (result_tx, result_rx) = crossbeam_channel::bounded(1);
+            let _searcher = Searcher::run(database, query_rx, result_tx)?;
 
-            self.matcher_tx = Some(matcher_tx);
+            self.query_tx = Some(query_tx);
             self.on_query_change()?;
 
             loop {
                 let terminal_width = terminal.size()?.width;
                 terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
-                channel::select! {
+                crossbeam_channel::select! {
                     recv(result_rx) -> hits => {
                         self.handle_search_result(hits?)?;
                     }
@@ -226,7 +218,7 @@ impl<'a> TuiApp<'a> {
 
         let display_func = |id: &EntryId| {
             let entry = self.database.as_ref().unwrap().entry(*id);
-            let match_detail = self.matcher.as_ref().unwrap().match_detail(&entry).unwrap();
+            let match_detail = self.query.as_ref().unwrap().match_detail(&entry).unwrap();
             let contents = columns
                 .iter()
                 .map(|column| {
@@ -533,17 +525,20 @@ impl<'a> TuiApp<'a> {
         }
 
         let query = self.text_box_state.text();
-        let matcher = MatcherBuilder::new(query)
+        let query = QueryBuilder::new(query)
             .match_path(self.config.flags.match_path)
             .auto_match_path(self.config.flags.auto_match_path)
             .case_insensitive(!self.config.flags.case_sensitive)
             .regex(self.config.flags.regex)
+            .sort_by(self.config.ui.sort_by)
+            .sort_order(self.config.ui.sort_order)
+            .dirs_before_files(self.config.ui.dirs_before_files)
             .build();
 
-        if let Ok(matcher) = matcher {
-            self.matcher = Some(matcher.clone());
+        if let Ok(query) = query {
+            self.query = Some(query.clone());
             self.search_in_progress = true;
-            self.matcher_tx.as_ref().unwrap().send(matcher)?;
+            self.query_tx.as_ref().unwrap().send(query)?;
         }
 
         Ok(())

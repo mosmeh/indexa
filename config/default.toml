@@ -21,8 +21,14 @@
 # location = "/path/to/database/database.db"
 
 # File/directory statuses to index. [basename, path, extension, size, mode, created, modified, accessed]
-# basename is implicitly specified.
+# basename, path and extension are implicitly specified.
 # index = [
+#     "path"
+# ]
+
+# File/directory statuses to enable fast sorting. [basename, path, extension, size, mode, created, modified, accessed]
+# basename is implicitly specified.
+# fast_sort = [
 #     "path"
 # ]
 
@@ -35,7 +41,7 @@
 ignore_hidden = false
 
 [ui]
-# File/directory status to sort by. The status has to be indexed.
+# File/directory status to sort by. [basename, path, extension, size, mode, created, modified, accessed]
 sort_by = "basename"
 
 # Sort order. [ascending, descending]
