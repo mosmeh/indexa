@@ -370,6 +370,7 @@ impl<'a> TuiApp<'a> {
         }
     }
 
+    #[allow(clippy::unnested_or_patterns, clippy::unknown_clippy_lints)]
     fn handle_key(&mut self, key: KeyEvent) -> Result<State> {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc)
