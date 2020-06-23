@@ -3,8 +3,7 @@ use indexa::query::Query;
 
 use anyhow::Result;
 use crossbeam_channel::{self, Receiver, Sender};
-use std::fs::File;
-use std::io::BufReader;
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
@@ -131,7 +130,5 @@ fn load_database<P>(db_path: P) -> Result<Database>
 where
     P: AsRef<Path>,
 {
-    let reader = BufReader::new(File::open(&db_path)?);
-    let db: Database = bincode::deserialize_from(reader)?;
-    Ok(db)
+    Ok(bincode::deserialize(&fs::read(db_path)?)?)
 }
