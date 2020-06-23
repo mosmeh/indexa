@@ -8,7 +8,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp;
-use std::fmt;
 use std::fs::{DirEntry, FileType, Metadata};
 use std::io;
 use std::mem;
@@ -16,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
+use strum_macros::Display;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
@@ -33,6 +33,12 @@ impl Database {
     #[inline]
     pub fn num_entries(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn dirs(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.root_ids
+            .iter()
+            .map(move |id| self.path_from_node(&self.entries[*id as usize]))
     }
 
     #[inline]
@@ -458,11 +464,12 @@ impl DatabaseBuilder {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Enum)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Enum, Display)]
 #[serde(rename_all = "lowercase")]
 pub enum StatusKind {
     Basename,
     #[serde(rename = "path")]
+    #[strum(serialize = "Path")]
     FullPath,
     Extension,
     Size,
@@ -470,21 +477,6 @@ pub enum StatusKind {
     Created,
     Modified,
     Accessed,
-}
-
-impl fmt::Display for StatusKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StatusKind::FullPath => f.write_str("Path"),
-            StatusKind::Basename => f.write_str("Basename"),
-            StatusKind::Size => f.write_str("Size"),
-            StatusKind::Mode => f.write_str("Mode"),
-            StatusKind::Extension => f.write_str("Extension"),
-            StatusKind::Created => f.write_str("Created"),
-            StatusKind::Modified => f.write_str("Modified"),
-            StatusKind::Accessed => f.write_str("Accessed"),
-        }
-    }
 }
 
 #[derive(Debug, Copy, Clone)]
