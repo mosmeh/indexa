@@ -82,3 +82,39 @@ impl fmt::Display for DisplayPowerShell {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check(mode: u32, powershell: &str, traditional: &str) {
+        let mode = Mode::from(mode);
+        assert_eq!(format!("{}", mode.display_powershell()), powershell);
+        assert_eq!(format!("{}", mode.display_traditional()), traditional);
+    }
+
+    #[test]
+    fn check_both() {
+        check(0x0000, "-----", "");
+        check(0x0010, "d----", "D");
+        check(0x0020, "-a---", "A");
+        check(0x0021, "-ar--", "RA");
+        check(0x0023, "-arh-", "RHA");
+        check(0x0024, "-a--s", "SA");
+        check(0x0027, "-arhs", "RHSA");
+        check(0x0122, "-a-h-", "HAT");
+        check(0x0220, "-a---", "AP");
+        check(0x0410, "l----", "DL");
+        check(0x0420, "la---", "AL");
+        check(0x0820, "-a---", "AC");
+        check(0x1010, "d----", "DO");
+        check(0x1224, "-a--s", "SAPO");
+        check(0x1326, "-a-hs", "HSATPO");
+        check(0x2004, "----s", "SI");
+        check(0x2020, "-a---", "AI");
+        check(0x2024, "-a--s", "SAI");
+        check(0x2026, "-a-hs", "HSAI");
+        check(0x2920, "-a---", "ATCI");
+        check(0x200000 - 1, "larhs", "RHSVDAXNTPLCOIEVXPU");
+    }
+}

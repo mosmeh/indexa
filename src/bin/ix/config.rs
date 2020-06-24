@@ -10,7 +10,7 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub flags: FlagConfig,
@@ -18,7 +18,7 @@ pub struct Config {
     pub ui: UIConfig,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct FlagConfig {
     pub query: Option<String>,
@@ -59,7 +59,7 @@ impl FlagConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
     pub location: Option<PathBuf>,
@@ -103,7 +103,7 @@ impl Default for DatabaseConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UIConfig {
     pub sort_by: StatusKind,
@@ -123,12 +123,20 @@ impl Default for UIConfig {
             sort_by: StatusKind::Basename,
             sort_order: SortOrder::Ascending,
             dirs_before_files: false,
-            human_readable_size: false,
+            human_readable_size: true,
             datetime_format: "%Y/%m/%d %T".to_string(),
             columns: vec![
                 Column {
                     status: StatusKind::Basename,
                     width: None,
+                },
+                Column {
+                    status: StatusKind::Size,
+                    width: Some(10),
+                },
+                Column {
+                    status: StatusKind::Modified,
+                    width: Some(20),
                 },
                 Column {
                     status: StatusKind::FullPath,
@@ -141,7 +149,7 @@ impl Default for UIConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UIConfigUnix {
     pub mode_format: ModeFormatUnix,
@@ -155,7 +163,7 @@ impl Default for UIConfigUnix {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UIConfigWindows {
     pub mode_format: ModeFormatWindows,
@@ -169,20 +177,20 @@ impl Default for UIConfigWindows {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     pub status: StatusKind,
     pub width: Option<u16>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModeFormatUnix {
     Octal,
     Symbolic,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModeFormatWindows {
     Traditional,
@@ -228,5 +236,42 @@ where
         writer.flush()?;
 
         Ok(toml::from_str(DEFAULT_CONFIG)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn create_and_read() {
+        let config_file = NamedTempFile::new().unwrap();
+        let config_path = config_file.path();
+
+        let default_config: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
+        let created_config = read_or_create_config(Some(config_path)).unwrap();
+        assert_eq!(default_config, created_config);
+
+        let read_config = read_or_create_config(Some(config_path)).unwrap();
+        assert_eq!(created_config, read_config);
+    }
+
+    #[test]
+    fn empty() {
+        let empty_file = NamedTempFile::new().unwrap();
+
+        let default_config: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
+        let config = read_or_create_config(Some(empty_file.path())).unwrap();
+        assert_eq!(default_config, config);
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid config file")]
+    fn invalid() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "xxx").unwrap();
+
+        read_or_create_config(Some(file.path())).unwrap();
     }
 }

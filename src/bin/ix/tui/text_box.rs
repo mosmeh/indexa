@@ -196,3 +196,43 @@ impl Default for TextBoxState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edit() {
+        let mut state = TextBoxState::new();
+        assert_eq!("", state.text());
+        state.on_char('a');
+        assert_eq!("a", state.text());
+        state.on_left();
+        state.on_char('x');
+        assert_eq!("xa", state.text());
+        state.on_char('あ');
+        assert_eq!("xあa", state.text());
+        state.on_backspace();
+        assert_eq!("xa", state.text());
+        state.on_end();
+        state.on_char('亜');
+        assert_eq!("xa亜", state.text());
+        state.on_left();
+        state.on_delete();
+        assert_eq!("xa", state.text());
+        state.on_home();
+        state.on_char('𠮷');
+        assert_eq!("𠮷xa", state.text());
+        state.on_right();
+        state.on_char('b');
+        assert_eq!("𠮷xba", state.text());
+
+        let mut state2 = TextBoxState::with_text("𠮷x".to_string());
+        state2.on_char('b');
+        state2.on_char('a');
+        assert_eq!(state.text(), state2.text());
+
+        state.clear();
+        assert_eq!("", state.text());
+    }
+}

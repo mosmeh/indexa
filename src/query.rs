@@ -69,7 +69,7 @@ impl Query {
     }
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
     Ascending,
@@ -237,4 +237,75 @@ fn should_search_match_path(
     }
 
     string.contains(std::path::MAIN_SEPARATOR)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_match_path() {
+        use std::path::MAIN_SEPARATOR as SEP;
+
+        assert!(should_search_match_path(true, false, false, "foo"));
+        assert!(should_search_match_path(
+            false,
+            true,
+            false,
+            &format!("foo{}bar", SEP)
+        ));
+        assert!(!should_search_match_path(false, true, false, "foo"));
+
+        if SEP == '\\' {
+            assert!(should_search_match_path(false, true, true, "foo\\\\"));
+            assert!(should_search_match_path(false, true, true, "foo\\\\bar"));
+            assert!(!should_search_match_path(false, true, true, "foo\\bar"));
+        } else {
+            assert!(should_search_match_path(
+                false,
+                true,
+                true,
+                &format!("foo{}", SEP)
+            ));
+            assert!(should_search_match_path(
+                false,
+                true,
+                true,
+                &format!("foo{}bar", SEP)
+            ));
+        }
+    }
+
+    #[test]
+    fn match_detail() {
+        let query_str = "bar";
+        let match_detail = MatchDetail {
+            regex: &Regex::new(query_str).unwrap(),
+            match_path: false,
+            basename: "barbaz",
+            path_str: "aaa/foobarbaz/barbaz".to_string(),
+        };
+        assert_eq!(match_detail.basename_matches(), vec![0..3]);
+        assert_eq!(match_detail.path_matches(), vec![14..17]);
+
+        let query_str = "bar";
+        let match_detail = MatchDetail {
+            regex: &Regex::new(query_str).unwrap(),
+            match_path: true,
+            basename: "barbaz",
+            path_str: "aaa/foobarbaz/barbaz".to_string(),
+        };
+        assert_eq!(match_detail.basename_matches(), vec![0..3]);
+        assert_eq!(match_detail.path_matches(), vec![7..10, 14..17]);
+
+        let query_str = "[0-9]+";
+        let match_detail = MatchDetail {
+            regex: &Regex::new(query_str).unwrap(),
+            match_path: true,
+            basename: "foo123bar",
+            path_str: "0042bar/a/foo123bar".to_string(),
+        };
+        assert_eq!(match_detail.basename_matches(), vec![3..6]);
+        assert_eq!(match_detail.path_matches(), vec![0..4, 13..16]);
+    }
 }

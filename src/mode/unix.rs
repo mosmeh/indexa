@@ -97,3 +97,36 @@ impl fmt::Display for DisplaySymbolic {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check(mode: u32, octal: &str, symbolic: &str) {
+        let mode = Mode::from(mode);
+        assert_eq!(format!("{}", mode.display_octal()), octal);
+        assert_eq!(format!("{}", mode.display_symbolic()), symbolic);
+    }
+
+    #[test]
+    fn check_both() {
+        check(0o0555, "0555", "-r-xr-xr-x");
+        check(0o0600, "0600", "-rw-------");
+        check(0o0644, "0644", "-rw-r--r--");
+        check(0o0664, "0664", "-rw-rw-r--");
+        check(0o0755, "0755", "-rwxr-xr-x");
+        check(0o1600, "1600", "-rw------T");
+        check(0o1777, "1777", "-rwxrwxrwt");
+        check(0o2745, "2745", "-rwxr-Sr-x");
+        check(0o2755, "2755", "-rwxr-sr-x");
+        check(0o4455, "4455", "-r-Sr-xr-x");
+        check(0o4555, "4555", "-r-sr-xr-x");
+        check(0o020444, "0444", "cr--r--r--");
+        check(0o040700, "0700", "drwx------");
+        check(0o060640, "0640", "brw-r-----");
+        check(0o100555, "0555", "-r-xr-xr-x");
+        check(0o100600, "0600", "-rw-------");
+        check(0o100664, "0664", "-rw-rw-r--");
+        check(0o120755, "0755", "lrwxr-xr-x");
+    }
+}

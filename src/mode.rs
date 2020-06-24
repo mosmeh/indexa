@@ -37,3 +37,16 @@ impl HasFlag for u32 {
         self & flag == flag
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flag() {
+        assert!(0b11.has_flag(1));
+        assert!(0b11.has_flag(0));
+        assert!(0b11.has_flag(0b10));
+        assert!(!0b10.has_flag(1));
+    }
+}

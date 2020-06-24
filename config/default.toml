@@ -64,7 +64,7 @@ status = "basename"
 
 [[ui.columns]]
 status = "size"
-width = 9
+width = 10
 
 [[ui.columns]]
 status = "modified"
