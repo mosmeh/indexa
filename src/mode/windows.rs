@@ -11,7 +11,7 @@ const FILE_ATTRIBUTE_ARCHIVE: u32 = 0x00000020;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x00000400;
 
 const ATTRIBUTE_CHARS: [char; 21] = [
-    'R', 'H', 'S', '8', 'D', 'A', 'd', 'N', 'T', 's', 'L', 'C', 'O', 'I', 'E', 'V', '\0', 'X',
+    'R', 'H', 'S', 'V', 'D', 'A', 'X', 'N', 'T', 'P', 'L', 'C', 'O', 'I', 'E', 'V', '\0', 'X',
     '\0', 'P', 'U',
 ];
 
