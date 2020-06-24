@@ -540,7 +540,10 @@ impl<'a> Entry<'a> {
                 if self.is_dir() {
                     self.path().read_dir().map(|rd| rd.count() as u64).ok()
                 } else {
-                    self.path().metadata().map(|metadata| metadata.len()).ok()
+                    self.path()
+                        .symlink_metadata()
+                        .map(|metadata| metadata.len())
+                        .ok()
                 }
             })
     }
@@ -553,7 +556,7 @@ impl<'a> Entry<'a> {
             .map(|v| v[self.id.0 as usize])
             .or_else(|| {
                 self.path()
-                    .metadata()
+                    .symlink_metadata()
                     .map(|metadata| Mode::from(&metadata))
                     .ok()
             })
@@ -567,7 +570,7 @@ impl<'a> Entry<'a> {
             .map(|v| Cow::Borrowed(&v[self.id.0 as usize]))
             .or_else(|| {
                 self.path()
-                    .metadata()
+                    .symlink_metadata()
                     .ok()
                     .and_then(|metadata| metadata.created().ok())
                     .map(|created| Cow::Owned(sanitize_system_time(&created)))
@@ -582,7 +585,7 @@ impl<'a> Entry<'a> {
             .map(|v| Cow::Borrowed(&v[self.id.0 as usize]))
             .or_else(|| {
                 self.path()
-                    .metadata()
+                    .symlink_metadata()
                     .ok()
                     .and_then(|metadata| metadata.modified().ok())
                     .map(|modified| Cow::Owned(sanitize_system_time(&modified)))
@@ -597,7 +600,7 @@ impl<'a> Entry<'a> {
             .map(|v| Cow::Borrowed(&v[self.id.0 as usize]))
             .or_else(|| {
                 self.path()
-                    .metadata()
+                    .symlink_metadata()
                     .ok()
                     .and_then(|metadata| metadata.accessed().ok())
                     .map(|accessed| Cow::Owned(sanitize_system_time(&accessed)))
@@ -707,7 +710,7 @@ impl EntryInfo {
         };
         let name = name.ok_or(Error::Utf8)?.to_string();
 
-        let metadata = path.metadata()?;
+        let metadata = path.symlink_metadata()?;
         let ftype = metadata.file_type();
 
         if ftype.is_dir() {
