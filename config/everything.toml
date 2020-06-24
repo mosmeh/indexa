@@ -1,0 +1,35 @@
+[flags]
+auto_match_path = true
+
+[database]
+index = [
+    "size",
+    "modified"
+]
+fast_sort = [
+    "path",
+    "size",
+    "modified"
+]
+
+[ui]
+sort_by = "basename"
+sort_order = "ascending"
+dirs_before_files = true
+human_readable_size = true
+datetime_format = "%Y/%m/%d %R"
+
+[[ui.columns]]
+status = "basename"
+width = 50
+
+[[ui.columns]]
+status = "path"
+
+[[ui.columns]]
+status = "size"
+width = 15
+
+[[ui.columns]]
+status = "modified"
+width = 18
