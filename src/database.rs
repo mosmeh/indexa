@@ -711,8 +711,13 @@ impl EntryInfo {
         let ftype = metadata.file_type();
 
         if ftype.is_dir() {
-            let dir_entries = path.read_dir()?.collect::<Vec<_>>();
-            let num_children = dir_entries.len();
+            let (dir_entries, num_children) = if let Ok(rd) = path.read_dir() {
+                let dir_entries = rd.collect::<Vec<_>>();
+                let num_children = dir_entries.len();
+                (Some(dir_entries), num_children)
+            } else {
+                (None, 0)
+            };
 
             Ok(Self {
                 name,
@@ -722,7 +727,7 @@ impl EntryInfo {
                     &metadata,
                     index_flags,
                 )?,
-                dir_entries: Some(dir_entries),
+                dir_entries,
             })
         } else {
             Ok(Self {
@@ -741,8 +746,13 @@ impl EntryInfo {
         if ftype.is_dir() {
             let path = dent.path();
 
-            let dir_entries = path.read_dir()?.collect::<Vec<_>>();
-            let num_children = dir_entries.len();
+            let (dir_entries, num_children) = if let Ok(rd) = path.read_dir() {
+                let dir_entries = rd.collect::<Vec<_>>();
+                let num_children = dir_entries.len();
+                (Some(dir_entries), num_children)
+            } else {
+                (None, 0)
+            };
 
             Ok(Self {
                 name,
@@ -752,7 +762,7 @@ impl EntryInfo {
                     &dent.metadata()?,
                     index_flags,
                 )?,
-                dir_entries: Some(dir_entries),
+                dir_entries,
             })
         } else {
             Ok(Self {
@@ -858,7 +868,7 @@ fn walk_file_system(
 
     let sub_dir_entries = child_dirs
         .iter_mut()
-        .map(|info| mem::replace(&mut info.dir_entries, None).unwrap())
+        .map(|info| mem::replace(&mut info.dir_entries, None))
         .collect::<Vec<_>>();
 
     let (dir_start, dir_end) = {
@@ -884,6 +894,9 @@ fn walk_file_system(
     (dir_start..dir_end)
         .into_par_iter()
         .zip(sub_dir_entries.par_iter())
+        .filter_map(|(index, dir_entries)| {
+            dir_entries.as_ref().map(|dir_entries| (index, dir_entries))
+        })
         .for_each_with(database, |database, (index, dir_entries)| {
             walk_file_system(
                 database.clone(),
