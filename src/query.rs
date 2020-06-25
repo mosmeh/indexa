@@ -61,8 +61,7 @@ impl Query {
     #[inline]
     pub fn match_detail<'a, 'b>(&'a self, entry: &'b Entry) -> Result<MatchDetail<'a, 'b>> {
         Ok(MatchDetail {
-            regex: &self.regex,
-            match_path: self.match_path,
+            query: &self,
             basename: entry.basename(),
             path_str: entry.path().to_str().ok_or(Error::Utf8)?.to_string(),
         })
@@ -150,7 +149,7 @@ impl<'a> QueryBuilder<'a> {
 
         Ok(Query {
             regex,
-            match_path: should_search_match_path(
+            match_path: should_match_path(
                 self.match_path,
                 self.auto_match_path,
                 self.regex,
@@ -164,8 +163,7 @@ impl<'a> QueryBuilder<'a> {
 }
 
 pub struct MatchDetail<'a, 'b> {
-    regex: &'a Regex,
-    match_path: bool,
+    query: &'a Query,
     basename: &'b str,
     path_str: String,
 }
@@ -176,8 +174,11 @@ impl MatchDetail<'_, '_> {
     }
 
     pub fn basename_matches(&self) -> Vec<Range<usize>> {
-        if self.match_path {
-            self.regex
+        if self.query.is_empty() {
+            Vec::new()
+        } else if self.query.match_path() {
+            self.query
+                .regex()
                 .find_iter(&self.path_str)
                 .filter_map(|m| {
                     if self.path_str.len() - m.end() < self.basename.len() {
@@ -194,7 +195,8 @@ impl MatchDetail<'_, '_> {
                 })
                 .collect()
         } else {
-            self.regex
+            self.query
+                .regex()
                 .find_iter(self.basename)
                 .map(|m| m.range())
                 .collect()
@@ -202,13 +204,17 @@ impl MatchDetail<'_, '_> {
     }
 
     pub fn path_matches(&self) -> Vec<Range<usize>> {
-        if self.match_path {
-            self.regex
+        if self.query.is_empty() {
+            Vec::new()
+        } else if self.query.match_path() {
+            self.query
+                .regex()
                 .find_iter(&self.path_str)
                 .map(|m| m.range())
                 .collect()
         } else {
-            self.regex
+            self.query
+                .regex()
                 .find_iter(self.basename)
                 .map(|m| Range {
                     start: self.path_str.len() - self.basename.len() + m.start(),
@@ -219,12 +225,7 @@ impl MatchDetail<'_, '_> {
     }
 }
 
-fn should_search_match_path(
-    match_path: bool,
-    auto_inpath: bool,
-    regex: bool,
-    string: &str,
-) -> bool {
+fn should_match_path(match_path: bool, auto_inpath: bool, regex: bool, string: &str) -> bool {
     if match_path {
         return true;
     }
@@ -247,27 +248,22 @@ mod tests {
     fn auto_match_path() {
         use std::path::MAIN_SEPARATOR as SEP;
 
-        assert!(should_search_match_path(true, false, false, "foo"));
-        assert!(should_search_match_path(
+        assert!(should_match_path(true, false, false, "foo"));
+        assert!(should_match_path(
             false,
             true,
             false,
             &format!("foo{}bar", SEP)
         ));
-        assert!(!should_search_match_path(false, true, false, "foo"));
+        assert!(!should_match_path(false, true, false, "foo"));
 
         if SEP == '\\' {
-            assert!(should_search_match_path(false, true, true, "foo\\\\"));
-            assert!(should_search_match_path(false, true, true, "foo\\\\bar"));
-            assert!(!should_search_match_path(false, true, true, "foo\\bar"));
+            assert!(should_match_path(false, true, true, "foo\\\\"));
+            assert!(should_match_path(false, true, true, "foo\\\\bar"));
+            assert!(!should_match_path(false, true, true, "foo\\bar"));
         } else {
-            assert!(should_search_match_path(
-                false,
-                true,
-                true,
-                &format!("foo{}", SEP)
-            ));
-            assert!(should_search_match_path(
+            assert!(should_match_path(false, true, true, &format!("foo{}", SEP)));
+            assert!(should_match_path(
                 false,
                 true,
                 true,
@@ -278,30 +274,31 @@ mod tests {
 
     #[test]
     fn match_detail() {
-        let query_str = "bar";
+        let query = QueryBuilder::new("bar").build().unwrap();
         let match_detail = MatchDetail {
-            regex: &Regex::new(query_str).unwrap(),
-            match_path: false,
+            query: &query,
             basename: "barbaz",
             path_str: "aaa/foobarbaz/barbaz".to_string(),
         };
         assert_eq!(match_detail.basename_matches(), vec![0..3]);
         assert_eq!(match_detail.path_matches(), vec![14..17]);
 
-        let query_str = "bar";
+        let query = QueryBuilder::new("bar").match_path(true).build().unwrap();
         let match_detail = MatchDetail {
-            regex: &Regex::new(query_str).unwrap(),
-            match_path: true,
+            query: &query,
             basename: "barbaz",
             path_str: "aaa/foobarbaz/barbaz".to_string(),
         };
         assert_eq!(match_detail.basename_matches(), vec![0..3]);
         assert_eq!(match_detail.path_matches(), vec![7..10, 14..17]);
 
-        let query_str = "[0-9]+";
+        let query = QueryBuilder::new("[0-9]+")
+            .match_path(true)
+            .regex(true)
+            .build()
+            .unwrap();
         let match_detail = MatchDetail {
-            regex: &Regex::new(query_str).unwrap(),
-            match_path: true,
+            query: &query,
             basename: "foo123bar",
             path_str: "0042bar/a/foo123bar".to_string(),
         };

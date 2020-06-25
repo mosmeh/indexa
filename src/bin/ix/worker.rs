@@ -83,11 +83,6 @@ impl SearcherImpl {
                     }
 
                     let query = query?;
-                    if query.is_empty() {
-                        let _ = self.tx.send(Vec::new());
-                        continue;
-                    }
-
                     let database = self.database.clone();
                     let tx_clone = self.tx.clone();
                     let aborted = Arc::new(AtomicBool::new(false));

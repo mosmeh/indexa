@@ -60,7 +60,9 @@ impl Database {
     }
 
     pub fn search(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
-        if query.match_path() {
+        if query.is_empty() {
+            self.match_all(query)
+        } else if query.match_path() {
             self.match_path(query, aborted)
         } else {
             self.match_basename(query, aborted)
@@ -70,6 +72,10 @@ impl Database {
     #[inline]
     pub fn entry(&self, id: EntryId) -> Entry<'_> {
         Entry { database: self, id }
+    }
+
+    fn match_all(&self, query: &Query) -> Result<Vec<EntryId>> {
+        self.collect_hits(query, |(id, _)| Some(Ok(EntryId(id))))
     }
 
     fn match_basename(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
