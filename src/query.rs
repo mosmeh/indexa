@@ -11,7 +11,7 @@ pub struct Query {
     match_path: bool,
     sort_by: StatusKind,
     sort_order: SortOrder,
-    dirs_before_files: bool,
+    sort_dirs_before_files: bool,
 }
 
 impl Query {
@@ -36,8 +36,8 @@ impl Query {
     }
 
     #[inline]
-    pub fn dirs_before_files(&self) -> bool {
-        self.dirs_before_files
+    pub fn sort_dirs_before_files(&self) -> bool {
+        self.sort_dirs_before_files
     }
 
     #[inline]
@@ -83,7 +83,7 @@ pub struct QueryBuilder<'a> {
     regex: bool,
     sort_by: StatusKind,
     sort_order: SortOrder,
-    dirs_before_files: bool,
+    sort_dirs_before_files: bool,
 }
 
 impl<'a> QueryBuilder<'a> {
@@ -99,7 +99,7 @@ impl<'a> QueryBuilder<'a> {
             regex: false,
             sort_by: StatusKind::Basename,
             sort_order: SortOrder::Ascending,
-            dirs_before_files: false,
+            sort_dirs_before_files: false,
         }
     }
 
@@ -133,8 +133,8 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    pub fn dirs_before_files(&mut self, yes: bool) -> &mut Self {
-        self.dirs_before_files = yes;
+    pub fn sort_dirs_before_files(&mut self, yes: bool) -> &mut Self {
+        self.sort_dirs_before_files = yes;
         self
     }
 
@@ -157,7 +157,7 @@ impl<'a> QueryBuilder<'a> {
             ),
             sort_by: self.sort_by,
             sort_order: self.sort_order,
-            dirs_before_files: self.dirs_before_files,
+            sort_dirs_before_files: self.sort_dirs_before_files,
         })
     }
 }

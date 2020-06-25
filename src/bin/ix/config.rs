@@ -91,12 +91,8 @@ impl Default for DatabaseConfig {
 
         Self {
             location,
-            index: vec![
-                StatusKind::Basename,
-                StatusKind::FullPath,
-                StatusKind::Extension,
-            ],
-            fast_sort: vec![StatusKind::Basename],
+            index: Vec::new(),
+            fast_sort: Vec::new(),
             dirs,
             ignore_hidden: false,
         }
@@ -108,7 +104,7 @@ impl Default for DatabaseConfig {
 pub struct UIConfig {
     pub sort_by: StatusKind,
     pub sort_order: SortOrder,
-    pub dirs_before_files: bool,
+    pub sort_dirs_before_files: bool,
     pub human_readable_size: bool,
     pub datetime_format: String,
     pub columns: Vec<Column>,
@@ -122,7 +118,7 @@ impl Default for UIConfig {
         Self {
             sort_by: StatusKind::Basename,
             sort_order: SortOrder::Ascending,
-            dirs_before_files: false,
+            sort_dirs_before_files: false,
             human_readable_size: true,
             datetime_format: "%Y/%m/%d %T".to_string(),
             columns: vec![

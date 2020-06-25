@@ -1,6 +1,9 @@
-# Default values for command-line flags.
-# Flags provided to CLI will override this config.
+# Default indexa configuration file.
+
 [flags]
+# Default values for command-line flags.
+# Flags provided to CLI will override this ground of options.
+
 # Initial query.
 # query = "blah blah"
 
@@ -16,39 +19,61 @@
 # Whether to enable regex.
 # regex = true
 
+# Number of threads to use.
+# Defaults to the number of available CPUs - 1.
+# threads = 4
+
 [database]
-# Location of database file. Defaults to {the user's data directory}/indexa/database.db
+# Location of database file. Defaults to {user's data directory}/indexa/database.db
 # location = "/path/to/database/database.db"
 
-# File/directory statuses to index. [basename, path, extension, size, mode, created, modified, accessed]
+# File/directory statuses to index.
 # basename, path and extension are implicitly specified.
-# index = [
-#     "path"
-# ]
+index = [
+    # "size",
+    # "mode",
+    # "created",
+    # "modified",
+    # "accessed",
+]
 
-# File/directory statuses to enable fast sorting. [basename, path, extension, size, mode, created, modified, accessed]
+# File/directory statuses to enable fast sorting for.
 # basename is implicitly specified.
-# fast_sort = [
-#     "path"
-# ]
+fast_sort = [
+    # "path",
+    # "extension",
+    # "size",
+    # "mode",
+    # "created",
+    # "modified",
+    # "accessed",
+]
 
-# Root directories to index.
+# Root directories to index. Defaults to / on Unix and C:\ on Windows.
 # dirs = [
-#     "/"
+#     "/",
 # ]
 
 # Whether to ignore hidden files/directories.
 ignore_hidden = false
 
 [ui]
-# File/directory status to sort by. [basename, path, extension, size, mode, created, modified, accessed]
+# File/directory status to sort by.
 sort_by = "basename"
+# sort_by = "path"
+# sort_by = "extension"
+# sort_by = "size"
+# sort_by = "mode"
+# sort_by = "created"
+# sort_by = "modified"
+# sort_by = "accessed"
 
-# Sort order. [ascending, descending]
+# Sort order.
 sort_order = "ascending"
+# sort_order = "descending"
 
 # Whether to sort directories before files.
-dirs_before_files = false
+sort_dirs_before_files = false
 
 # Whether to show size in human readable format.
 human_readable_size = true
@@ -74,9 +99,11 @@ width = 20
 status = "path"
 
 [ui.unix]
-# Format of mode column. [octal, symbolic]
+# Format of mode column.
 mode_format = "symbolic"
+# mode_format = "octal"
 
 [ui.windows]
-# Format of mode column. [traditional, powershell]
+# Format of mode column.
 mode_format = "traditional"
+# mode_format = "powershell"

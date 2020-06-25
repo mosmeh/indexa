@@ -533,7 +533,7 @@ impl<'a> TuiApp<'a> {
             .regex(self.config.flags.regex)
             .sort_by(self.config.ui.sort_by)
             .sort_order(self.config.ui.sort_order)
-            .dirs_before_files(self.config.ui.dirs_before_files)
+            .sort_dirs_before_files(self.config.ui.sort_dirs_before_files)
             .build();
 
         if let Ok(query) = query {

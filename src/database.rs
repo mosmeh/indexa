@@ -229,7 +229,7 @@ impl Database {
             Ok(v)
         };
 
-        if query.dirs_before_files() {
+        if query.sort_dirs_before_files() {
             hits.map(|mut hits| {
                 hits.as_parallel_slice_mut().par_sort_by(|a, b| {
                     self.entries[b.0 as usize]
