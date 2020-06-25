@@ -3,6 +3,7 @@ use crate::query::{Query, SortOrder};
 use crate::{Error, Result};
 use enum_map::{enum_map, Enum, EnumMap};
 use itertools::Itertools;
+use parking_lot::Mutex;
 use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,7 @@ use std::io;
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::SystemTime;
 use strum_macros::Display;
 
@@ -418,8 +419,6 @@ impl DatabaseBuilder {
             sorted_ids: EnumMap::new(),
         };
 
-        let database = Arc::new(Mutex::new(database));
-
         let mut dirs = self
             .dirs
             .iter()
@@ -439,6 +438,8 @@ impl DatabaseBuilder {
         dirs.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
         dirs.dedup_by(|(_, a), (_, b)| a.starts_with(&b as &str));
 
+        let database = Arc::new(Mutex::new(database));
+
         for (path, path_str) in &dirs {
             let mut root_info = EntryInfo::from_path(&path, &self.index_flags)?;
             if !root_info.ftype.is_dir() {
@@ -448,7 +449,7 @@ impl DatabaseBuilder {
             let dir_entries = mem::replace(&mut root_info.dir_entries, None).unwrap();
 
             let root_node_id = {
-                let mut db = database.lock().unwrap();
+                let mut db = database.lock();
 
                 let root_node_id = db.entries.len() as u32;
                 db.push_entry(
@@ -473,7 +474,7 @@ impl DatabaseBuilder {
         }
 
         // safe to unwrap since above codes are the only users of database at the moment
-        let mut database = Arc::try_unwrap(database).unwrap().into_inner().unwrap();
+        let mut database = Arc::try_unwrap(database).unwrap().into_inner();
 
         database.sorted_ids =
             generate_sorted_ids(&database, &self.index_flags, &self.fast_sort_flags);
@@ -881,7 +882,7 @@ fn walk_file_system(
         .collect::<Vec<_>>();
 
     let (dir_start, dir_end) = {
-        let mut db = database.lock().unwrap();
+        let mut db = database.lock();
 
         let child_start = db.entries.len() as u32;
         let dir_end = child_start + child_dirs.len() as u32;
