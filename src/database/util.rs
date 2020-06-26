@@ -78,3 +78,50 @@ pub fn sanitize_system_time(time: &SystemTime) -> SystemTime {
         SystemTime::UNIX_EPOCH
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_canonicalize_dirs() {
+        use std::fs;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let path = tmpdir.path();
+
+        let dirs = vec![
+            path.join("a"),
+            path.join("a/b/.."),
+            path.join("e"),
+            path.join("b/c"),
+            path.join("a/b"),
+            PathBuf::new(),
+            path.join("b/c/d"),
+            path.join("e/a/b"),
+            path.join("e/."),
+        ];
+        for dir in &dirs {
+            fs::create_dir_all(dir).unwrap();
+        }
+
+        assert_eq!(
+            canonicalize_dirs(&dirs),
+            vec![path.join("a"), path.join("b/c"), path.join("e")]
+                .iter()
+                .map(|p| dunce::canonicalize(p).unwrap())
+                .collect::<Vec<_>>()
+        );
+
+        assert!(canonicalize_dirs::<PathBuf>(&[]).is_empty());
+        assert!(canonicalize_dirs(&[PathBuf::new()]).is_empty());
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let path = tmpdir.path();
+        std::env::set_current_dir(path).unwrap();
+        assert_eq!(
+            canonicalize_dirs(&[Path::new(".")]),
+            vec![dunce::canonicalize(path).unwrap()]
+        );
+    }
+}

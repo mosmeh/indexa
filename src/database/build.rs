@@ -461,3 +461,110 @@ fn is_hidden(dent: &DirEntry) -> bool {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::database::*;
+    use itertools::Itertools;
+    use std::fs;
+    use std::path::Path;
+    use strum::IntoEnumIterator;
+    use tempfile::TempDir;
+
+    fn tmpdir() -> TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    fn create_dir_structure<P>(dirs: &[P]) -> TempDir
+    where
+        P: AsRef<Path>,
+    {
+        let tmpdir = tmpdir();
+        let path = tmpdir.path();
+
+        for dir in dirs {
+            fs::create_dir_all(path.join(dir)).unwrap();
+        }
+
+        tmpdir
+    }
+
+    fn collect_paths<'a>(entries: impl Iterator<Item = Entry<'a>>) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        for entry in entries {
+            paths.push(entry.path());
+            paths.append(&mut collect_paths(entry.children()));
+        }
+        paths
+    }
+
+    #[test]
+    fn build() {
+        let tmpdir =
+            create_dir_structure(&[Path::new("a/b"), Path::new("e/a/b"), Path::new("b/c/d")]);
+        let tmpdir2 =
+            create_dir_structure(&[Path::new("a/b"), Path::new("f/b"), Path::new("𠮷/😥")]);
+        let path = tmpdir.path();
+        let path2 = tmpdir2.path();
+
+        let mut builder = DatabaseBuilder::new();
+        for kind in StatusKind::iter() {
+            builder.index(kind);
+            builder.fast_sort(kind);
+        }
+
+        let database = builder.add_dir(path).add_dir(path2).build().unwrap();
+
+        let mut paths = collect_paths(database.root_entries());
+        paths.sort_unstable();
+
+        assert_eq!(
+            paths,
+            vec![
+                path.to_path_buf(),
+                path.join("a"),
+                path.join("a/b"),
+                path.join("b"),
+                path.join("b/c"),
+                path.join("b/c/d"),
+                path.join("e"),
+                path.join("e/a"),
+                path.join("e/a/b"),
+                path2.to_path_buf(),
+                path2.join("a"),
+                path2.join("a/b"),
+                path2.join("f"),
+                path2.join("f/b"),
+                path2.join("𠮷"),
+                path2.join("𠮷/😥")
+            ]
+            .iter()
+            .map(|p| dunce::canonicalize(p).unwrap())
+            .collect::<Vec<_>>()
+            .iter()
+            .sorted()
+            .cloned()
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn empty_database() {
+        let database = DatabaseBuilder::new().build().unwrap();
+        assert_eq!(database.num_entries(), 0);
+
+        let database = DatabaseBuilder::new().add_dir("xxxx").build().unwrap();
+        assert_eq!(database.num_entries(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Fast sorting cannot be enabled for a non-indexed status")]
+    fn fast_sort_for_non_indexed_status() {
+        let tmpdir = tmpdir();
+        DatabaseBuilder::new()
+            .fast_sort(StatusKind::Size)
+            .add_dir(tmpdir.path())
+            .build()
+            .unwrap();
+    }
+}
