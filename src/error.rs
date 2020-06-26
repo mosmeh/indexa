@@ -9,10 +9,10 @@ pub enum Error {
     RegexBuild(#[from] regex::Error),
     #[error("{0}")]
     InvalidOption(String),
-    #[error("Invalid UTF-8 sequence")]
-    Utf8,
-    #[error("Invalid filename")]
-    Filename,
+    #[error("Encountered non-UTF-8 path")]
+    NonUtf8Path,
+    #[error("Could not get filename")]
+    NoFilename,
     #[error("Search aborted")]
     SearchAbort,
 }

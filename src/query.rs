@@ -63,7 +63,7 @@ impl Query {
         Ok(MatchDetail {
             query: &self,
             basename: entry.basename(),
-            path_str: entry.path().to_str().ok_or(Error::Utf8)?.to_string(),
+            path_str: entry.path().to_str().ok_or(Error::NonUtf8Path)?.to_string(),
         })
     }
 }
@@ -234,7 +234,7 @@ fn should_match_path(match_path: bool, auto_inpath: bool, regex: bool, string: &
     }
 
     if regex && std::path::MAIN_SEPARATOR == '\\' {
-        return string.contains("\\\\");
+        return string.contains(r"\\");
     }
 
     string.contains(std::path::MAIN_SEPARATOR)
@@ -258,9 +258,9 @@ mod tests {
         assert!(!should_match_path(false, true, false, "foo"));
 
         if SEP == '\\' {
-            assert!(should_match_path(false, true, true, "foo\\\\"));
-            assert!(should_match_path(false, true, true, "foo\\\\bar"));
-            assert!(!should_match_path(false, true, true, "foo\\bar"));
+            assert!(should_match_path(false, true, true, r"foo\\"));
+            assert!(should_match_path(false, true, true, r"foo\\bar"));
+            assert!(!should_match_path(false, true, true, r"foo\bar"));
         } else {
             assert!(should_match_path(false, true, true, &format!("foo{}", SEP)));
             assert!(should_match_path(

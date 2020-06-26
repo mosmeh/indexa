@@ -1,28 +1,23 @@
+mod build;
+mod search;
+mod util;
+
+pub use build::DatabaseBuilder;
+
 use crate::mode::Mode;
-use crate::query::{Query, SortOrder};
-use crate::{Error, Result};
-use enum_map::{enum_map, Enum, EnumMap};
-use itertools::Itertools;
-use parking_lot::Mutex;
-use rayon::prelude::*;
-use regex::Regex;
+
+use enum_map::{Enum, EnumMap};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::cmp;
-use std::fs::{DirEntry, FileType, Metadata};
-use std::io;
-use std::mem;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::SystemTime;
-use strum_macros::Display;
+use strum_macros::{Display, EnumIter};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
     name_arena: String,
     entries: Vec<EntryNode>,
-    root_ids: Vec<u32>,
+    root_paths: HashMap<u32, PathBuf>,
     size: Option<Vec<u64>>,
     mode: Option<Vec<Mode>>,
     created: Option<Vec<SystemTime>>,
@@ -37,10 +32,11 @@ impl Database {
         self.entries.len()
     }
 
-    pub fn dirs(&self) -> impl Iterator<Item = PathBuf> + '_ {
-        self.root_ids
-            .iter()
-            .map(move |id| self.path_from_node(&self.entries[*id as usize]))
+    #[inline]
+    pub fn root_entries(&self) -> impl ExactSizeIterator<Item = Entry<'_>> {
+        self.root_paths
+            .keys()
+            .map(move |id| self.entry(EntryId(*id)))
     }
 
     #[inline]
@@ -60,217 +56,9 @@ impl Database {
         self.sorted_ids[kind].is_some()
     }
 
-    pub fn search(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
-        if query.is_empty() {
-            self.match_all(query)
-        } else if query.match_path() {
-            self.match_path(query, aborted)
-        } else {
-            self.match_basename(query, aborted)
-        }
-    }
-
     #[inline]
     pub fn entry(&self, id: EntryId) -> Entry<'_> {
         Entry { database: self, id }
-    }
-
-    fn match_all(&self, query: &Query) -> Result<Vec<EntryId>> {
-        self.collect_hits(query, |(id, _)| Some(Ok(EntryId(id))))
-    }
-
-    fn match_basename(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
-        self.collect_hits(query, |(id, node)| {
-            if aborted.load(Ordering::Relaxed) {
-                return Some(Err(Error::SearchAbort));
-            }
-
-            if query.regex().is_match(&self.basename_from_node(node)) {
-                Some(Ok(EntryId(id)))
-            } else {
-                None
-            }
-        })
-    }
-
-    fn match_path(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
-        let mut hits = Vec::with_capacity(self.entries.len());
-        for _ in 0..self.entries.len() {
-            hits.push(AtomicBool::new(false));
-        }
-
-        for (root_id, next_root_id) in self
-            .root_ids
-            .iter()
-            .copied()
-            .chain(std::iter::once(self.entries.len() as u32))
-            .tuple_windows()
-        {
-            let root_node = &self.entries[root_id as usize];
-            if query.regex().is_match(&self.basename_from_node(root_node)) {
-                (root_id..next_root_id).into_par_iter().try_for_each(|id| {
-                    if aborted.load(Ordering::Relaxed) {
-                        return Err(Error::SearchAbort);
-                    }
-                    hits[id as usize].store(true, Ordering::Relaxed);
-                    Ok(())
-                })?;
-            } else {
-                self.match_path_impl(
-                    root_node,
-                    Path::new(&self.basename_from_node(root_node)),
-                    &query.regex(),
-                    &hits,
-                    aborted.clone(),
-                )?;
-            }
-        }
-
-        self.collect_hits(query, |(id, _)| {
-            if aborted.load(Ordering::Relaxed) {
-                return Some(Err(Error::SearchAbort));
-            }
-
-            if hits[id as usize].load(Ordering::Relaxed) {
-                Some(Ok(EntryId(id)))
-            } else {
-                None
-            }
-        })
-    }
-
-    fn match_path_impl(
-        &self,
-        node: &EntryNode,
-        path: &Path,
-        regex: &Regex,
-        hits: &[AtomicBool],
-        aborted: Arc<AtomicBool>,
-    ) -> Result<()> {
-        (node.child_start..node.child_end)
-            .into_par_iter()
-            .try_for_each(|id| {
-                if aborted.load(Ordering::Relaxed) {
-                    return Err(Error::SearchAbort);
-                }
-
-                let child = &self.entries[id as usize];
-                let child_path = path.join(&self.basename_from_node(child));
-                if let Some(s) = child_path.to_str() {
-                    if regex.is_match(s) {
-                        hits[id as usize].store(true, Ordering::Relaxed);
-
-                        if child.has_any_child() {
-                            self.match_all_descendants(child, hits, aborted.clone())?;
-                        }
-                    } else if child.has_any_child() {
-                        self.match_path_impl(child, &child_path, regex, hits, aborted.clone())?;
-                    }
-                }
-
-                Ok(())
-            })
-    }
-
-    fn match_all_descendants(
-        &self,
-        node: &EntryNode,
-        hits: &[AtomicBool],
-        aborted: Arc<AtomicBool>,
-    ) -> Result<()> {
-        (node.child_start..node.child_end)
-            .into_par_iter()
-            .try_for_each(|id| {
-                if aborted.load(Ordering::Relaxed) {
-                    return Err(Error::SearchAbort);
-                }
-
-                hits[id as usize].store(true, Ordering::Relaxed);
-
-                let child = &self.entries[id as usize];
-                if child.has_any_child() {
-                    self.match_all_descendants(child, hits, aborted.clone())?;
-                }
-
-                Ok(())
-            })
-    }
-
-    fn collect_hits<F>(&self, query: &Query, func: F) -> Result<Vec<EntryId>>
-    where
-        F: Fn((u32, &EntryNode)) -> Option<Result<EntryId>> + Send + Sync,
-    {
-        let hits: Result<Vec<_>> = if self.is_fast_sortable(query.sort_by()) {
-            let iter = self.sorted_ids[query.sort_by()]
-                .as_ref()
-                .unwrap()
-                .par_iter()
-                .map(|id| (*id, &self.entries[*id as usize]));
-            match query.sort_order() {
-                SortOrder::Ascending => iter.filter_map(func).collect(),
-                SortOrder::Descending => iter.rev().filter_map(func).collect(),
-            }
-        } else {
-            let mut v = (0..self.entries.len() as u32)
-                .into_par_iter()
-                .zip(self.entries.par_iter())
-                .filter_map(func)
-                .collect::<Result<Vec<_>>>()?;
-
-            let compare_func = build_compare_func(query.sort_by());
-            match query.sort_order() {
-                SortOrder::Ascending => v
-                    .as_parallel_slice_mut()
-                    .par_sort_unstable_by(|a, b| compare_func(&self.entry(*a), &self.entry(*b))),
-                SortOrder::Descending => v
-                    .as_parallel_slice_mut()
-                    .par_sort_unstable_by(|a, b| compare_func(&self.entry(*b), &self.entry(*a))),
-            };
-
-            Ok(v)
-        };
-
-        if query.sort_dirs_before_files() {
-            hits.map(|mut hits| {
-                hits.as_parallel_slice_mut().par_sort_by(|a, b| {
-                    self.entries[b.0 as usize]
-                        .is_dir
-                        .cmp(&self.entries[a.0 as usize].is_dir)
-                });
-                hits
-            })
-        } else {
-            hits
-        }
-    }
-
-    #[inline]
-    fn push_entry(&mut self, info: EntryInfo, parent: u32) {
-        self.entries.push(EntryNode {
-            name_start: self.name_arena.len(),
-            name_len: info.name.len() as u16,
-            parent,
-            child_start: u32::MAX,
-            child_end: u32::MAX,
-            is_dir: info.ftype.is_dir(),
-        });
-        self.name_arena.push_str(&info.name);
-
-        if let Some(size) = &mut self.size {
-            size.push(info.status.size.unwrap());
-        }
-        if let Some(mode) = &mut self.mode {
-            mode.push(info.status.mode.unwrap());
-        }
-        if let Some(created) = &mut self.created {
-            created.push(info.status.created.unwrap());
-        }
-        if let Some(modified) = &mut self.modified {
-            modified.push(info.status.modified.unwrap());
-        }
-        if let Some(accessed) = &mut self.accessed {
-            accessed.push(info.status.accessed.unwrap());
-        }
     }
 
     #[inline]
@@ -279,211 +67,33 @@ impl Database {
     }
 
     #[inline]
-    fn path_from_node(&self, node: &EntryNode) -> PathBuf {
-        let mut buf = PathBuf::new();
-        self.path_from_node_impl(node.parent, &mut buf);
-        buf.push(&self.basename_from_node(node));
-        buf
-    }
-
-    fn path_from_node_impl(&self, index: u32, mut buf: &mut PathBuf) {
-        let dir = &self.entries[index as usize];
-        if dir.parent == index {
+    fn path_from_id(&self, id: u32) -> PathBuf {
+        let node = &self.entries[id as usize];
+        if node.parent == id {
             // root node
-            buf.push(&self.basename_from_node(&self.entries[dir.parent as usize]));
+            self.root_paths[&id].clone()
         } else {
-            self.path_from_node_impl(dir.parent, &mut buf);
+            let mut buf = self.path_from_id(node.parent);
+            buf.push(&self.basename_from_node(node));
+            buf
         }
-        buf.push(&self.basename_from_node(dir));
     }
 
     #[inline]
-    fn path_vec_from_node<'a>(&'a self, node: &'a EntryNode) -> Vec<&'a str> {
-        let mut buf = Vec::new();
-        self.path_vec_from_node_impl(node.parent, &mut buf);
-        buf.push(&self.basename_from_node(node));
-        buf
-    }
-
-    fn path_vec_from_node_impl<'a>(&'a self, index: u32, mut buf: &mut Vec<&'a str>) {
-        let dir = &self.entries[index as usize];
-        if dir.parent == index {
+    fn path_vec_from_id<'a>(&'a self, id: u32) -> Vec<&'a str> {
+        let node = &self.entries[id as usize];
+        if node.parent == id {
             // root node
-            buf.push(&self.basename_from_node(&self.entries[dir.parent as usize]));
+            vec![self.root_paths[&id].to_str().unwrap()]
         } else {
-            self.path_vec_from_node_impl(dir.parent, &mut buf);
-        }
-        buf.push(&self.basename_from_node(dir));
-    }
-}
-
-pub struct DatabaseBuilder {
-    dirs: Vec<PathBuf>,
-    index_flags: StatusFlags,
-    fast_sort_flags: StatusFlags,
-    ignore_hidden: bool,
-}
-
-impl Default for DatabaseBuilder {
-    fn default() -> Self {
-        Self {
-            dirs: Vec::new(),
-            index_flags: enum_map! {
-                StatusKind::Basename => true,
-                StatusKind::FullPath => true,
-                StatusKind::Extension => true,
-                StatusKind::Size => false,
-                StatusKind::Mode => false,
-                StatusKind::Created => false,
-                StatusKind::Modified => false,
-                StatusKind::Accessed => false,
-            },
-            fast_sort_flags: enum_map! {
-                StatusKind::Basename => true,
-                StatusKind::FullPath => false,
-                StatusKind::Extension => false,
-                StatusKind::Size => false,
-                StatusKind::Mode => false,
-                StatusKind::Created => false,
-                StatusKind::Modified => false,
-                StatusKind::Accessed => false,
-            },
-            ignore_hidden: false,
+            let mut buf = self.path_vec_from_id(node.parent);
+            buf.push(&self.basename_from_node(node));
+            buf
         }
     }
 }
 
-impl DatabaseBuilder {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn add_dir<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
-        self.dirs.push(path.as_ref().to_path_buf());
-        self
-    }
-
-    pub fn index(&mut self, kind: StatusKind) -> &mut Self {
-        self.index_flags[kind] = true;
-        self
-    }
-
-    pub fn fast_sort(&mut self, kind: StatusKind) -> &mut Self {
-        self.fast_sort_flags[kind] = true;
-        self
-    }
-
-    pub fn ignore_hidden(&mut self, yes: bool) -> &mut Self {
-        self.ignore_hidden = yes;
-        self
-    }
-
-    pub fn build(&self) -> Result<Database> {
-        for (kind, enabled) in self.fast_sort_flags {
-            if enabled && !self.index_flags[kind] {
-                return Err(Error::InvalidOption(
-                    "Fast sorting cannot be enabled for a non-indexed status.".to_string(),
-                ));
-            }
-        }
-
-        let database = Database {
-            name_arena: String::new(),
-            entries: Vec::new(),
-            root_ids: Vec::new(),
-            size: if self.index_flags[StatusKind::Size] {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            mode: if self.index_flags[StatusKind::Mode] {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            created: if self.index_flags[StatusKind::Created] {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            modified: if self.index_flags[StatusKind::Modified] {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            accessed: if self.index_flags[StatusKind::Accessed] {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            sorted_ids: EnumMap::new(),
-        };
-
-        let mut dirs = self
-            .dirs
-            .iter()
-            .filter_map(|path| {
-                if let Ok(canonicalized) = dunce::canonicalize(path) {
-                    if let Some(path_str) = canonicalized.to_str() {
-                        let path_str = path_str.to_string();
-                        return Some((canonicalized, path_str));
-                    }
-                }
-                None
-            })
-            .collect::<Vec<_>>();
-
-        // remove redundant subdirectories
-        // we use str::starts_with, because Path::starts_with doesn't work well for Windows paths
-        dirs.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
-        dirs.dedup_by(|(_, a), (_, b)| a.starts_with(&b as &str));
-
-        let database = Arc::new(Mutex::new(database));
-
-        for (path, path_str) in &dirs {
-            let mut root_info = EntryInfo::from_path(&path, &self.index_flags)?;
-            if !root_info.ftype.is_dir() {
-                continue;
-            }
-
-            let dir_entries = mem::replace(&mut root_info.dir_entries, None).unwrap();
-
-            let root_node_id = {
-                let mut db = database.lock();
-
-                let root_node_id = db.entries.len() as u32;
-                db.push_entry(
-                    EntryInfo {
-                        name: path_str.to_string(),
-                        ..root_info
-                    },
-                    root_node_id,
-                );
-                db.root_ids.push(root_node_id);
-
-                root_node_id
-            };
-
-            walk_file_system(
-                database.clone(),
-                &self.index_flags,
-                self.ignore_hidden,
-                &dir_entries,
-                root_node_id,
-            );
-        }
-
-        // safe to unwrap since above codes are the only users of database at the moment
-        let mut database = Arc::try_unwrap(database).unwrap().into_inner();
-
-        database.sorted_ids =
-            generate_sorted_ids(&database, &self.index_flags, &self.fast_sort_flags);
-
-        Ok(database)
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Enum, Display)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Enum, Display, EnumIter)]
 #[serde(rename_all = "lowercase")]
 pub enum StatusKind {
     Basename,
@@ -513,13 +123,19 @@ impl<'a> Entry<'a> {
     }
 
     #[inline]
+    pub fn children(&self) -> impl ExactSizeIterator<Item = Entry<'_>> {
+        let node = &self.node();
+        (node.child_start..node.child_end).map(move |id| self.database.entry(EntryId(id)))
+    }
+
+    #[inline]
     pub fn basename(&self) -> &str {
         self.database.basename_from_node(self.node())
     }
 
     #[inline]
     pub fn path(&self) -> PathBuf {
-        self.database.path_from_node(&self.node())
+        self.database.path_from_id(self.id.0)
     }
 
     #[inline]
@@ -570,53 +186,53 @@ impl<'a> Entry<'a> {
     }
 
     #[inline]
-    pub fn created(&self) -> Option<Cow<'a, SystemTime>> {
+    pub fn created(&self) -> Option<SystemTime> {
         self.database
             .created
             .as_ref()
-            .map(|v| Cow::Borrowed(&v[self.id.0 as usize]))
+            .map(|v| v[self.id.0 as usize])
             .or_else(|| {
                 self.path()
                     .symlink_metadata()
                     .ok()
                     .and_then(|metadata| metadata.created().ok())
-                    .map(|created| Cow::Owned(sanitize_system_time(&created)))
+                    .map(|created| util::sanitize_system_time(&created))
             })
     }
 
     #[inline]
-    pub fn modified(&self) -> Option<Cow<'a, SystemTime>> {
+    pub fn modified(&self) -> Option<SystemTime> {
         self.database
             .modified
             .as_ref()
-            .map(|v| Cow::Borrowed(&v[self.id.0 as usize]))
+            .map(|v| v[self.id.0 as usize])
             .or_else(|| {
                 self.path()
                     .symlink_metadata()
                     .ok()
                     .and_then(|metadata| metadata.modified().ok())
-                    .map(|modified| Cow::Owned(sanitize_system_time(&modified)))
+                    .map(|modified| util::sanitize_system_time(&modified))
             })
     }
 
     #[inline]
-    pub fn accessed(&self) -> Option<Cow<'a, SystemTime>> {
+    pub fn accessed(&self) -> Option<SystemTime> {
         self.database
             .accessed
             .as_ref()
-            .map(|v| Cow::Borrowed(&v[self.id.0 as usize]))
+            .map(|v| v[self.id.0 as usize])
             .or_else(|| {
                 self.path()
                     .symlink_metadata()
                     .ok()
                     .and_then(|metadata| metadata.accessed().ok())
-                    .map(|accessed| Cow::Owned(sanitize_system_time(&accessed)))
+                    .map(|accessed| util::sanitize_system_time(&accessed))
             })
     }
 
     #[inline]
     fn path_vec(&'a self) -> Vec<&'a str> {
-        self.database.path_vec_from_node(&self.node())
+        self.database.path_vec_from_id(self.id.0)
     }
 
     #[inline]
@@ -639,309 +255,5 @@ impl EntryNode {
     #[inline]
     fn has_any_child(&self) -> bool {
         self.child_start < self.child_end
-    }
-}
-
-type StatusFlags = EnumMap<StatusKind, bool>;
-
-struct EntryStatus {
-    size: Option<u64>,
-    mode: Option<Mode>,
-    created: Option<SystemTime>,
-    modified: Option<SystemTime>,
-    accessed: Option<SystemTime>,
-}
-
-impl EntryStatus {
-    fn from_metadata(metadata: &Metadata, index_flags: &StatusFlags) -> Result<Self> {
-        let size = if index_flags[StatusKind::Size] {
-            Some(metadata.len())
-        } else {
-            None
-        };
-
-        Self::from_metadata_with_size(size, metadata, index_flags)
-    }
-
-    fn from_metadata_with_size(
-        size: Option<u64>,
-        metadata: &Metadata,
-        index_flags: &StatusFlags,
-    ) -> Result<Self> {
-        let mode = if index_flags[StatusKind::Mode] {
-            Some(metadata.into())
-        } else {
-            None
-        };
-
-        let created = if index_flags[StatusKind::Created] {
-            Some(sanitize_system_time(&metadata.created()?))
-        } else {
-            None
-        };
-        let modified = if index_flags[StatusKind::Modified] {
-            Some(sanitize_system_time(&metadata.modified()?))
-        } else {
-            None
-        };
-        let accessed = if index_flags[StatusKind::Accessed] {
-            Some(sanitize_system_time(&metadata.accessed()?))
-        } else {
-            None
-        };
-
-        let status = Self {
-            size,
-            mode,
-            created,
-            modified,
-            accessed,
-        };
-        Ok(status)
-    }
-}
-
-struct EntryInfo {
-    name: String,
-    ftype: FileType,
-    status: EntryStatus,
-    dir_entries: Option<Vec<io::Result<DirEntry>>>,
-}
-
-impl EntryInfo {
-    fn from_path(path: &Path, index_flags: &StatusFlags) -> Result<Self> {
-        let name = if path.parent().is_some() {
-            path.file_name().ok_or(Error::Filename)?.to_str()
-        } else {
-            path.to_str()
-        };
-        let name = name.ok_or(Error::Utf8)?.to_string();
-
-        let metadata = path.symlink_metadata()?;
-        let ftype = metadata.file_type();
-
-        if ftype.is_dir() {
-            let (dir_entries, num_children) = if let Ok(rd) = path.read_dir() {
-                let dir_entries = rd.collect::<Vec<_>>();
-                let num_children = dir_entries.len();
-                (Some(dir_entries), num_children)
-            } else {
-                (None, 0)
-            };
-
-            Ok(Self {
-                name,
-                ftype,
-                status: EntryStatus::from_metadata_with_size(
-                    Some(num_children as u64),
-                    &metadata,
-                    index_flags,
-                )?,
-                dir_entries,
-            })
-        } else {
-            Ok(Self {
-                name,
-                ftype,
-                status: EntryStatus::from_metadata(&metadata, index_flags)?,
-                dir_entries: None,
-            })
-        }
-    }
-
-    fn from_dir_entry(dent: &DirEntry, index_flags: &StatusFlags) -> Result<Self> {
-        let name = dent.file_name().to_str().ok_or(Error::Utf8)?.to_string();
-        let ftype = dent.file_type()?;
-
-        if ftype.is_dir() {
-            let path = dent.path();
-
-            let (dir_entries, num_children) = if let Ok(rd) = path.read_dir() {
-                let dir_entries = rd.collect::<Vec<_>>();
-                let num_children = dir_entries.len();
-                (Some(dir_entries), num_children)
-            } else {
-                (None, 0)
-            };
-
-            Ok(Self {
-                name,
-                ftype,
-                status: EntryStatus::from_metadata_with_size(
-                    Some(num_children as u64),
-                    &dent.metadata()?,
-                    index_flags,
-                )?,
-                dir_entries,
-            })
-        } else {
-            Ok(Self {
-                name,
-                ftype,
-                status: EntryStatus::from_metadata(&dent.metadata()?, index_flags)?,
-                dir_entries: None,
-            })
-        }
-    }
-}
-
-fn generate_sorted_ids(
-    database: &Database,
-    index_flags: &StatusFlags,
-    fast_sort_flags: &StatusFlags,
-) -> EnumMap<StatusKind, Option<Vec<u32>>> {
-    let mut sorted_ids = EnumMap::new();
-    for (kind, key) in sorted_ids.iter_mut() {
-        if index_flags[kind] && fast_sort_flags[kind] {
-            let compare_func = build_compare_func(kind);
-
-            let mut indices = (0..database.entries.len() as u32).collect::<Vec<_>>();
-            indices
-                .as_parallel_slice_mut()
-                .par_sort_unstable_by(|a, b| {
-                    compare_func(&database.entry(EntryId(*a)), &database.entry(EntryId(*b)))
-                });
-
-            *key = Some(indices);
-        }
-    }
-    sorted_ids
-}
-
-fn build_compare_func(
-    kind: StatusKind,
-) -> Box<dyn Fn(&Entry, &Entry) -> cmp::Ordering + Send + Sync> {
-    match kind {
-        StatusKind::Basename => Box::new(|a, b| a.basename().cmp(b.basename())),
-        StatusKind::FullPath => Box::new(|a, b| a.path_vec().cmp(&b.path_vec())),
-        StatusKind::Extension => Box::new(|a, b| {
-            a.extension()
-                .cmp(&b.extension())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Size => Box::new(|a, b| {
-            a.size()
-                .cmp(&b.size())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Mode => Box::new(|a, b| {
-            a.mode()
-                .cmp(&b.mode())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Created => Box::new(|a, b| {
-            a.created()
-                .cmp(&b.created())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Modified => Box::new(|a, b| {
-            a.modified()
-                .cmp(&b.modified())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Accessed => Box::new(|a, b| {
-            a.accessed()
-                .cmp(&b.accessed())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-    }
-}
-
-fn sanitize_system_time(time: &SystemTime) -> SystemTime {
-    // check for invalid SystemTime (e.g. older than unix epoch)
-    if let Ok(duration) = time.duration_since(SystemTime::UNIX_EPOCH) {
-        SystemTime::UNIX_EPOCH + duration
-    } else {
-        // defaults to unix epoch
-        SystemTime::UNIX_EPOCH
-    }
-}
-
-fn walk_file_system(
-    database: Arc<Mutex<Database>>,
-    index_flags: &StatusFlags,
-    ignore_hidden: bool,
-    dir_entries: &[io::Result<DirEntry>],
-    parent: u32,
-) {
-    let (mut child_dirs, child_files) = dir_entries
-        .iter()
-        .filter_map(|dent| {
-            dent.as_ref().ok().and_then(|dent| {
-                if ignore_hidden && is_hidden(dent) {
-                    return None;
-                }
-                EntryInfo::from_dir_entry(&dent, index_flags).ok()
-            })
-        })
-        .partition::<Vec<_>, _>(|info| info.ftype.is_dir());
-
-    let sub_dir_entries = child_dirs
-        .iter_mut()
-        .map(|info| mem::replace(&mut info.dir_entries, None))
-        .collect::<Vec<_>>();
-
-    let (dir_start, dir_end) = {
-        let mut db = database.lock();
-
-        let child_start = db.entries.len() as u32;
-        let dir_end = child_start + child_dirs.len() as u32;
-        let child_end = dir_end + child_files.len() as u32;
-
-        db.entries[parent as usize].child_start = child_start;
-        db.entries[parent as usize].child_end = child_end;
-
-        for info in child_dirs {
-            db.push_entry(info, parent);
-        }
-        for info in child_files {
-            db.push_entry(info, parent);
-        }
-
-        (child_start, dir_end)
-    };
-
-    (dir_start..dir_end)
-        .into_par_iter()
-        .zip(sub_dir_entries.par_iter())
-        .filter_map(|(index, dir_entries)| {
-            dir_entries.as_ref().map(|dir_entries| (index, dir_entries))
-        })
-        .for_each_with(database, |database, (index, dir_entries)| {
-            walk_file_system(
-                database.clone(),
-                index_flags,
-                ignore_hidden,
-                &dir_entries,
-                index,
-            );
-        });
-}
-
-// taken from https://github.com/BurntSushi/ripgrep/blob/1b2c1dc67583d70d1d16fc93c90db80bead4fb09/crates/ignore/src/pathutil.rs#L6-L46
-#[cfg(unix)]
-#[inline]
-fn is_hidden(dent: &DirEntry) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-
-    if let Some(name) = dent.path().file_name() {
-        name.as_bytes().get(0) == Some(&b'.')
-    } else {
-        false
-    }
-}
-
-#[cfg(windows)]
-#[inline]
-fn is_hidden(dent: &DirEntry) -> bool {
-    if let Ok(metadata) = dent.metadata() {
-        if Mode::from(&metadata).is_hidden() {
-            return true;
-        }
-    }
-    if let Some(name) = dent.path().file_name() {
-        name.to_str().map(|s| s.starts_with('.')).unwrap_or(false)
-    } else {
-        false
     }
 }

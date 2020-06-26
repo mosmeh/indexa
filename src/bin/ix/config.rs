@@ -79,7 +79,7 @@ impl Default for DatabaseConfig {
         });
 
         let default_root = if cfg!(windows) {
-            PathBuf::from("C:\\")
+            PathBuf::from(r"C:\")
         } else {
             PathBuf::from("/")
         };

@@ -20,7 +20,6 @@ use crossterm::event::{
     MouseEvent,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use std::borrow::Cow;
 use std::io::{self, Write};
 use std::ops::Range;
 use std::sync::Arc;
@@ -355,9 +354,9 @@ impl<'a> TuiApp<'a> {
         })
     }
 
-    fn display_datetime(&self, time: Option<Cow<'_, SystemTime>>) -> Option<String> {
+    fn display_datetime(&self, time: Option<SystemTime>) -> Option<String> {
         time.map(|t| {
-            let datetime = DateTime::<Local>::from(*t);
+            let datetime = DateTime::<Local>::from(t);
             format!("{}", datetime.format(&self.config.ui.datetime_format))
         })
     }
