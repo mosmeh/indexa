@@ -30,6 +30,10 @@ where
     dirs.iter().map(|(path, _)| path).cloned().collect()
 }
 
+pub fn get_basename(path: &Path) -> &std::ffi::OsStr {
+    path.file_name().unwrap_or_else(|| path.as_os_str())
+}
+
 pub fn build_compare_func(
     kind: StatusKind,
 ) -> Box<dyn Fn(&Entry, &Entry) -> Ordering + Send + Sync> {
@@ -123,5 +127,26 @@ mod tests {
             canonicalize_dirs(&[Path::new(".")]),
             vec![dunce::canonicalize(path).unwrap()]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_get_basename() {
+        assert_eq!("/", get_basename(Path::new("/")));
+        assert_eq!("foo", get_basename(Path::new("/foo")));
+        assert_eq!("bar", get_basename(Path::new("/foo/bar")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_get_basename() {
+        assert_eq!(r"C:\", get_basename(Path::new(r"C:\")));
+        assert_eq!("foo", get_basename(Path::new(r"C:\foo")));
+        assert_eq!("bar", get_basename(Path::new(r"C:\foo\bar")));
+        assert_eq!(
+            r"\\server\share\",
+            get_basename(Path::new(r"\\server\share\"))
+        );
+        assert_eq!("foo", get_basename(Path::new(r"\\server\share\foo")));
     }
 }

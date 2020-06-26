@@ -135,14 +135,7 @@ impl DatabaseBuilder {
                 let mut db = database.lock();
 
                 let root_node_id = db.entries.len() as u32;
-                db.push_entry(
-                    EntryInfo {
-                        // safe to unwrap because of canonicalize_dirs
-                        name: path.to_str().unwrap().to_string(),
-                        ..root_info
-                    },
-                    root_node_id,
-                );
+                db.push_entry(root_info, root_node_id);
                 db.root_paths.insert(root_node_id, path);
 
                 root_node_id
@@ -273,13 +266,10 @@ struct EntryInfo {
 
 impl EntryInfo {
     fn from_path(path: &Path, index_flags: &StatusFlags) -> Result<Self> {
-        let name = if path.parent().is_some() {
-            path.file_name().ok_or(Error::NoFilename)?.to_str()
-        } else {
-            path.to_str()
-        };
-        let name = name.ok_or(Error::NonUtf8Path)?.to_string();
-
+        let name = util::get_basename(path)
+            .to_str()
+            .ok_or(Error::NonUtf8Path)?
+            .to_string();
         let metadata = path.symlink_metadata()?;
         let ftype = metadata.file_type();
 
@@ -492,6 +482,7 @@ mod tests {
     fn collect_paths<'a>(entries: impl Iterator<Item = Entry<'a>>) -> Vec<PathBuf> {
         let mut paths = Vec::new();
         for entry in entries {
+            assert_eq!(entry.path().file_name().unwrap(), entry.basename());
             paths.push(entry.path());
             paths.append(&mut collect_paths(entry.children()));
         }
