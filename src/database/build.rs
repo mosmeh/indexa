@@ -124,31 +124,32 @@ impl DatabaseBuilder {
         let database = Arc::new(Mutex::new(database));
 
         for path in dirs {
-            let mut root_info = EntryInfo::from_path(&path, &self.index_flags)?;
-            if !root_info.ftype.is_dir() {
-                continue;
-            }
+            if let Ok(mut root_info) = EntryInfo::from_path(&path, &self.index_flags) {
+                if !root_info.ftype.is_dir() {
+                    continue;
+                }
 
-            let dir_entries = mem::replace(&mut root_info.dir_entries, None);
+                let dir_entries = mem::replace(&mut root_info.dir_entries, None);
 
-            let root_node_id = {
-                let mut db = database.lock();
+                let root_node_id = {
+                    let mut db = database.lock();
 
-                let root_node_id = db.entries.len() as u32;
-                db.push_entry(root_info, root_node_id);
-                db.root_paths.insert(root_node_id, path);
+                    let root_node_id = db.entries.len() as u32;
+                    db.push_entry(root_info, root_node_id);
+                    db.root_paths.insert(root_node_id, path);
 
-                root_node_id
-            };
+                    root_node_id
+                };
 
-            if let Some(dir_entries) = dir_entries {
-                walk_file_system(
-                    database.clone(),
-                    &self.index_flags,
-                    self.ignore_hidden,
-                    &dir_entries,
-                    root_node_id,
-                );
+                if let Some(dir_entries) = dir_entries {
+                    walk_file_system(
+                        database.clone(),
+                        &self.index_flags,
+                        self.ignore_hidden,
+                        &dir_entries,
+                        root_node_id,
+                    );
+                }
             }
         }
 
