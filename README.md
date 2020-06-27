@@ -28,7 +28,7 @@ vi $(ix)
 
 On the first launch, indexa will ask you if you want to create a database with a default configuration.
 
-To update the database:
+To update the database, run:
 
 ```sh
 ix -u
@@ -41,8 +41,29 @@ indexa's configuration file is located at `~/.config/indexa/config.toml` on Unix
 ## Key bindings
 
 - <kbd>Enter</kbd> to select current line and quit
-- <kbd>Esc</kbd> / <kbd>C-C</kbd> / <kbd>C-G</kbd> to abort
-- <kbd>Up</kbd> / <kbd>C-p</kbd> / <kbd>C-k</kbd>, <kbd>Down</kbd> / <kbd>C-n</kbd> / <kbd>C-j</kbd>, <kbd>Page Up</kbd>, and <kbd>Page Down</kbd> to move cursor up/down
-- <kbd>C-Home</kbd> / <kbd>Shift-Home</kbd> and <kbd>C-End</kbd> / <kbd>Shift-End</kbd> to scroll to top/bottom of the list
-- <kbd>C-a</kbd> / <kbd>Home</kbd> and <kbd>C-e</kbd> / <kbd>End</kbd> to move cursor to beginning/end of query
-- <kbd>C-u</kbd> to clear the query
+- <kbd>ESC</kbd> / <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>G</kbd> to abort
+- <kbd>Up</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Down</kbd> / <kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>Ctrl</kbd>+<kbd>J</kbd>, <kbd>Page Up</kbd>, and <kbd>Page Down</kbd> to move cursor up/down
+- <kbd>Ctrl</kbd>+<kbd>Home</kbd> / <kbd>Shift</kbd>+<kbd>Home</kbd> and <kbd>Ctrl</kbd>+<kbd>End</kbd> / <kbd>Shift</kbd>+<kbd>End</kbd> to scroll to top/bottom of the list
+- <kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Home</kbd> and <kbd>Ctrl</kbd>+<kbd>E</kbd> / <kbd>End</kbd> to move cursor to beginning/end of query
+- <kbd>Ctrl</kbd>+<kbd>U</kbd> to clear the query
+
+## Command-line options
+
+```
+USAGE:
+    ix.exe [FLAGS] [OPTIONS]
+
+FLAGS:
+    -s, --case-sensitive     Search case sensitively
+    -p, --match-path         Search in path
+        --auto-match-path    Search in path when query contains path separators
+    -r, --regex              Enable regex
+    -u, --update             Update database and exit
+    -h, --help               Prints help information
+    -V, --version            Prints version information
+
+OPTIONS:
+    -q, --query <query>        Initial query
+    -t, --threads <threads>    Number of threads to use
+    -C, --config <config>      Location of the config file
+```
