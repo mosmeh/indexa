@@ -195,13 +195,13 @@ pub enum ModeFormatWindows {
 
 const DEFAULT_CONFIG: &str = include_str!("../../../config/default.toml");
 
-const CONFIG_LOCATION_ERROR_MSG: &str = "Could not determine the location of config file. \
-    Please provide the location of config file with -C/--config option.";
-
 pub fn read_or_create_config<P>(config_path: Option<P>) -> Result<Config>
 where
     P: AsRef<Path>,
 {
+    const CONFIG_LOCATION_ERROR_MSG: &str = "Could not determine the location of config file. \
+    Please provide the location of config file with -C/--config option.";
+
     let path = if let Some(path) = config_path.as_ref() {
         Cow::Borrowed(path.as_ref())
     } else if cfg!(windows) {
@@ -227,9 +227,11 @@ where
             fs::create_dir_all(parent)?;
         }
 
-        let mut writer = BufWriter::new(File::create(path)?);
+        let mut writer = BufWriter::new(File::create(&path)?);
         writer.write_all(DEFAULT_CONFIG.as_bytes())?;
         writer.flush()?;
+
+        eprintln!("Created a default configuration file at {}", path.display());
 
         Ok(toml::from_str(DEFAULT_CONFIG)?)
     }

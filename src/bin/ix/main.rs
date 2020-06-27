@@ -2,13 +2,16 @@ mod config;
 mod tui;
 mod worker;
 
+use crate::config::Config;
+
 use indexa::database::DatabaseBuilder;
 
 use anyhow::{anyhow, Result};
+use dialoguer::Confirm;
 use rayon::ThreadPoolBuilder;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -72,39 +75,59 @@ fn main() -> Result<()> {
         .num_threads(config.flags.threads)
         .build_global()?;
 
-    if opt.update || !db_location.exists() {
-        if db_location.exists() {
-            eprintln!("Updating database");
+    if opt.update {
+        create_database(db_location, &config)?;
+        return Ok(());
+    } else if !db_location.exists() {
+        let yes = Confirm::new()
+            .with_prompt("Database is not created yet. Create it now?")
+            .interact_on(&console::Term::stderr())
+            .unwrap_or(false);
+        if yes {
+            create_database(db_location, &config)?;
         } else {
-            eprintln!("Creating database");
-
-            if let Some(parent) = db_location.parent() {
-                fs::create_dir_all(parent)?;
-            }
+            return Ok(());
         }
-
-        let mut db_builder = DatabaseBuilder::new();
-        for dir in &config.database.dirs {
-            db_builder.add_dir(&dir);
-        }
-        for kind in &config.database.index {
-            db_builder.index(*kind);
-        }
-        for kind in &config.database.fast_sort {
-            db_builder.fast_sort(*kind);
-        }
-
-        let database = db_builder
-            .ignore_hidden(config.database.ignore_hidden)
-            .build()?;
-
-        let mut writer = BufWriter::new(File::create(&db_location)?);
-        bincode::serialize_into(&mut writer, &database)?;
-        writer.flush()?;
     }
 
-    if !opt.update {
-        tui::run(&config)?;
+    tui::run(&config)?;
+
+    Ok(())
+}
+
+fn create_database<P: AsRef<Path>>(path: P, config: &Config) -> Result<()> {
+    let create = !path.as_ref().exists();
+    if create {
+        eprintln!("Creating a database");
+    } else {
+        eprintln!("Updating the database");
+    }
+
+    let mut builder = DatabaseBuilder::new();
+    for dir in &config.database.dirs {
+        builder.add_dir(&dir);
+    }
+    for kind in &config.database.index {
+        builder.index(*kind);
+    }
+    for kind in &config.database.fast_sort {
+        builder.fast_sort(*kind);
+    }
+
+    let database = builder
+        .ignore_hidden(config.database.ignore_hidden)
+        .build()?;
+
+    if let Some(parent) = path.as_ref().parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut writer = BufWriter::new(File::create(&path)?);
+    bincode::serialize_into(&mut writer, &database)?;
+    writer.flush()?;
+
+    if create {
+        eprintln!("Created a database at {}", path.as_ref().display());
     }
 
     Ok(())
