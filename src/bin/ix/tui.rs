@@ -277,7 +277,8 @@ impl<'a> TuiApp<'a> {
                     .bg(self.config.ui.colors.matched_bg),
             )
             .selected_symbol("> ")
-            .header_gap(1);
+            .header_gap(1)
+            .column_spacing(self.config.ui.column_spacing);
 
         let mut table_state = self.table_state.clone();
         f.render_stateful_widget(table, area, &mut table_state);

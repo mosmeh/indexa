@@ -109,6 +109,7 @@ pub struct UIConfig {
     pub sort_dirs_before_files: bool,
     pub human_readable_size: bool,
     pub datetime_format: String,
+    pub column_spacing: u16,
     pub columns: Vec<Column>,
     pub unix: UIConfigUnix,
     pub windows: UIConfigWindows,
@@ -122,7 +123,8 @@ impl Default for UIConfig {
             sort_order: SortOrder::Ascending,
             sort_dirs_before_files: false,
             human_readable_size: true,
-            datetime_format: "%Y/%m/%d %T".to_string(),
+            datetime_format: "%Y-%m-%d %R".to_string(),
+            column_spacing: 2,
             columns: vec![
                 Column {
                     status: StatusKind::Basename,
@@ -134,7 +136,7 @@ impl Default for UIConfig {
                 },
                 Column {
                     status: StatusKind::Modified,
-                    width: Some(20),
+                    width: Some(16),
                 },
                 Column {
                     status: StatusKind::FullPath,

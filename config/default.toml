@@ -79,7 +79,9 @@ sort_dirs_before_files = false
 human_readable_size = true
 
 # Datetime format for Created, Modified, and Accessed columns.
-datetime_format = "%Y/%m/%d %T"
+
+# Margin between columns.
+column_spacing = 2
 
 # Columns from left to right.
 # Columns with width specified will have fixed widths.
