@@ -387,12 +387,8 @@ impl<'a> TuiApp<'a> {
             | (KeyModifiers::CONTROL, KeyCode::Char('c'))
             | (KeyModifiers::CONTROL, KeyCode::Char('g')) => return Ok(State::Aborted),
             (_, KeyCode::Enter) => return Ok(State::Accepted),
-            (_, KeyCode::Up)
-            | (KeyModifiers::CONTROL, KeyCode::Char('p'))
-            | (KeyModifiers::CONTROL, KeyCode::Char('k')) => self.on_up()?,
-            (_, KeyCode::Down)
-            | (KeyModifiers::CONTROL, KeyCode::Char('n'))
-            | (KeyModifiers::CONTROL, KeyCode::Char('j')) => self.on_down()?,
+            (_, KeyCode::Up) | (KeyModifiers::CONTROL, KeyCode::Char('p')) => self.on_up()?,
+            (_, KeyCode::Down) | (KeyModifiers::CONTROL, KeyCode::Char('n')) => self.on_down()?,
             (_, KeyCode::PageUp) => self.on_pageup()?,
             (_, KeyCode::PageDown) => self.on_pagedown()?,
             (KeyModifiers::CONTROL, KeyCode::Home) | (KeyModifiers::SHIFT, KeyCode::Home) => {

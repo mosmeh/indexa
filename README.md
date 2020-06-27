@@ -42,7 +42,7 @@ indexa's configuration file is located at `~/.config/indexa/config.toml` on Unix
 
 - <kbd>Enter</kbd> to select current line and quit
 - <kbd>ESC</kbd> / <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>G</kbd> to abort
-- <kbd>Up</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Down</kbd> / <kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>Ctrl</kbd>+<kbd>J</kbd>, <kbd>Page Up</kbd>, and <kbd>Page Down</kbd> to move cursor up/down
+- <kbd>Up</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd>, <kbd>Down</kbd> / <kbd>Ctrl</kbd>+<kbd>N</kbd>, <kbd>Page Up</kbd>, and <kbd>Page Down</kbd> to move cursor up/down
 - <kbd>Ctrl</kbd>+<kbd>Home</kbd> / <kbd>Shift</kbd>+<kbd>Home</kbd> and <kbd>Ctrl</kbd>+<kbd>End</kbd> / <kbd>Shift</kbd>+<kbd>End</kbd> to scroll to top/bottom of the list
 - <kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Home</kbd> and <kbd>Ctrl</kbd>+<kbd>E</kbd> / <kbd>End</kbd> to move cursor to beginning/end of query
 - <kbd>Ctrl</kbd>+<kbd>U</kbd> to clear the query
