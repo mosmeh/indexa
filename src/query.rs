@@ -87,7 +87,9 @@ pub enum CaseSensitivity {
 #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
+    #[serde(alias = "asc")]
     Ascending,
+    #[serde(alias = "desc")]
     Descending,
 }
 

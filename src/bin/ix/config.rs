@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use tui::style::Color;
 
 #[derive(Debug, Default, PartialEq, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub flags: FlagConfig,
     pub database: DatabaseConfig,
@@ -21,7 +21,7 @@ pub struct Config {
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct FlagConfig {
     pub query: Option<String>,
     pub case_sensitive: bool,
@@ -95,7 +95,7 @@ impl FlagConfig {
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct DatabaseConfig {
     pub location: Option<PathBuf>,
     pub index: Vec<StatusKind>,
@@ -135,7 +135,7 @@ impl Default for DatabaseConfig {
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct UIConfig {
     pub sort_by: StatusKind,
     pub sort_order: SortOrder,
@@ -184,7 +184,7 @@ impl Default for UIConfig {
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct UIConfigUnix {
     pub mode_format: ModeFormatUnix,
 }
@@ -198,7 +198,7 @@ impl Default for UIConfigUnix {
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct UIConfigWindows {
     pub mode_format: ModeFormatWindows,
 }
@@ -212,7 +212,7 @@ impl Default for UIConfigWindows {
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ColorConfig {
     #[serde(deserialize_with = "deserialize_color")]
     pub selected_fg: Color,

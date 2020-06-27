@@ -1,4 +1,5 @@
 [flags]
+ignore_case = true
 auto_match_path = true
 
 [database]

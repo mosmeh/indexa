@@ -96,12 +96,15 @@ impl Database {
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Enum, Display, EnumIter)]
 #[serde(rename_all = "lowercase")]
 pub enum StatusKind {
+    #[serde(alias = "name")]
     Basename,
     #[serde(rename = "path")]
     #[strum(serialize = "Path")]
     FullPath,
+    #[serde(alias = "ext")]
     Extension,
     Size,
+    #[serde(alias = "attribute", alias = "attributes", alias = "attr")]
     Mode,
     Created,
     Modified,
