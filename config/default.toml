@@ -79,6 +79,7 @@ sort_dirs_before_files = false
 human_readable_size = true
 
 # Datetime format for Created, Modified, and Accessed columns.
+datetime_format = "%Y-%m-%d %R"
 
 # Margin between columns.
 column_spacing = 2
@@ -95,7 +96,7 @@ width = 10
 
 [[ui.columns]]
 status = "modified"
-width = 20
+width = 16
 
 [[ui.columns]]
 status = "path"
