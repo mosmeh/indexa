@@ -20,16 +20,25 @@ use structopt::StructOpt;
     author = env!("CARGO_PKG_AUTHORS"),
     rename_all = "kebab-case",
     setting(clap::AppSettings::ColoredHelp),
-    setting(clap::AppSettings::DeriveDisplayOrder)
+    setting(clap::AppSettings::DeriveDisplayOrder),
+    setting(clap::AppSettings::AllArgsOverrideSelf)
 )]
 pub struct Opt {
     /// Initial query.
     #[structopt(short = "q", long)]
     query: Option<String>,
 
-    /// Search case sensitively.
-    #[structopt(short = "s", long)]
+    /// Search case-sensitively.
+    ///
+    /// Defaults to smart case.
+    #[structopt(short = "s", long, overrides_with_all = &["ignore-case", "case-sensitive"])]
     case_sensitive: bool,
+
+    /// Search case-insensitively.
+    ///
+    /// Defaults to smart case.
+    #[structopt(short = "i", long, overrides_with_all = &["case-sensitive", "ignore-case"])]
+    ignore_case: bool,
 
     /// Search in path.
     #[structopt(short = "p", long)]

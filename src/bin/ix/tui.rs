@@ -541,9 +541,8 @@ impl<'a> TuiApp<'a> {
 
         let query = self.text_box_state.text();
         let query = QueryBuilder::new(query)
-            .match_path(self.config.flags.match_path)
-            .auto_match_path(self.config.flags.auto_match_path)
-            .case_insensitive(!self.config.flags.case_sensitive)
+            .match_path_mode(self.config.flags.match_path_mode())
+            .case_sensitivity(self.config.flags.case_sensitivity())
             .regex(self.config.flags.regex)
             .sort_by(self.config.ui.sort_by)
             .sort_order(self.config.ui.sort_order)

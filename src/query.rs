@@ -1,7 +1,9 @@
+mod regex_helper;
+
 use crate::database::{Entry, StatusKind};
 use crate::{Error, Result};
 use regex::{Regex, RegexBuilder};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::borrow::Cow;
 use std::ops::Range;
 
@@ -68,7 +70,21 @@ impl Query {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug)]
+pub enum MatchPathMode {
+    Always,
+    Never,
+    Auto,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum CaseSensitivity {
+    Sensitive,
+    Insensitive,
+    Smart,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SortOrder {
     Ascending,
@@ -76,10 +92,9 @@ pub enum SortOrder {
 }
 
 pub struct QueryBuilder<'a> {
-    string: Cow<'a, str>,
-    match_path: bool,
-    auto_match_path: bool,
-    case_insensitive: bool,
+    pattern: Cow<'a, str>,
+    match_path_mode: MatchPathMode,
+    case_sensitivity: CaseSensitivity,
     regex: bool,
     sort_by: StatusKind,
     sort_order: SortOrder,
@@ -92,10 +107,9 @@ impl<'a> QueryBuilder<'a> {
         P: Into<Cow<'a, str>>,
     {
         Self {
-            string: query_str.into(),
-            match_path: false,
-            auto_match_path: false,
-            case_insensitive: false,
+            pattern: query_str.into(),
+            match_path_mode: MatchPathMode::Never,
+            case_sensitivity: CaseSensitivity::Smart,
             regex: false,
             sort_by: StatusKind::Basename,
             sort_order: SortOrder::Ascending,
@@ -103,18 +117,13 @@ impl<'a> QueryBuilder<'a> {
         }
     }
 
-    pub fn match_path(&mut self, yes: bool) -> &mut Self {
-        self.match_path = yes;
+    pub fn match_path_mode(&mut self, match_path_mode: MatchPathMode) -> &mut Self {
+        self.match_path_mode = match_path_mode;
         self
     }
 
-    pub fn auto_match_path(&mut self, yes: bool) -> &mut Self {
-        self.auto_match_path = yes;
-        self
-    }
-
-    pub fn case_insensitive(&mut self, yes: bool) -> &mut Self {
-        self.case_insensitive = yes;
+    pub fn case_sensitivity(&mut self, case_sensitivity: CaseSensitivity) -> &mut Self {
+        self.case_sensitivity = case_sensitivity;
         self
     }
 
@@ -139,22 +148,20 @@ impl<'a> QueryBuilder<'a> {
     }
 
     pub fn build(&self) -> Result<Query> {
+        let case_sensitive =
+            should_be_case_sensitive(self.case_sensitivity, self.regex, &self.pattern);
+
         let regex = if self.regex {
-            RegexBuilder::new(&self.string)
+            RegexBuilder::new(&self.pattern)
         } else {
-            RegexBuilder::new(&regex::escape(&self.string))
+            RegexBuilder::new(&regex::escape(&self.pattern))
         }
-        .case_insensitive(self.case_insensitive)
+        .case_insensitive(!case_sensitive)
         .build()?;
 
         Ok(Query {
             regex,
-            match_path: should_match_path(
-                self.match_path,
-                self.auto_match_path,
-                self.regex,
-                &self.string,
-            ),
+            match_path: should_match_path(self.match_path_mode, self.regex, &self.pattern),
             sort_by: self.sort_by,
             sort_order: self.sort_order,
             sort_dirs_before_files: self.sort_dirs_before_files,
@@ -225,19 +232,32 @@ impl MatchDetail<'_, '_> {
     }
 }
 
-fn should_match_path(match_path: bool, auto_inpath: bool, regex: bool, string: &str) -> bool {
-    if match_path {
-        return true;
+fn should_match_path(match_path_mode: MatchPathMode, regex: bool, pattern: &str) -> bool {
+    match match_path_mode {
+        MatchPathMode::Always => true,
+        MatchPathMode::Never => false,
+        MatchPathMode::Auto => {
+            if regex && std::path::MAIN_SEPARATOR == '\\' {
+                pattern.contains(r"\\")
+            } else {
+                pattern.contains(std::path::MAIN_SEPARATOR)
+            }
+        }
     }
-    if !auto_inpath {
-        return false;
-    }
+}
 
-    if regex && std::path::MAIN_SEPARATOR == '\\' {
-        return string.contains(r"\\");
+fn should_be_case_sensitive(case_sensitivity: CaseSensitivity, regex: bool, pattern: &str) -> bool {
+    match case_sensitivity {
+        CaseSensitivity::Sensitive => true,
+        CaseSensitivity::Insensitive => false,
+        CaseSensitivity::Smart => {
+            if regex {
+                regex_helper::pattern_has_uppercase_char(pattern)
+            } else {
+                pattern.chars().any(|c| c.is_uppercase())
+            }
+        }
     }
-
-    string.contains(std::path::MAIN_SEPARATOR)
 }
 
 #[cfg(test)]
@@ -245,31 +265,72 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_match_path() {
-        use std::path::MAIN_SEPARATOR as SEP;
+    fn match_path() {
+        use std::path::MAIN_SEPARATOR;
 
-        assert!(should_match_path(true, false, false, "foo"));
+        assert!(should_match_path(MatchPathMode::Always, false, "foo"));
         assert!(should_match_path(
+            MatchPathMode::Auto,
             false,
-            true,
-            false,
-            &format!("foo{}bar", SEP)
+            &format!("foo{}bar", MAIN_SEPARATOR)
         ));
-        assert!(!should_match_path(false, true, false, "foo"));
+        assert!(!should_match_path(MatchPathMode::Auto, false, "foo"));
 
-        if SEP == '\\' {
-            assert!(should_match_path(false, true, true, r"foo\\"));
-            assert!(should_match_path(false, true, true, r"foo\\bar"));
-            assert!(!should_match_path(false, true, true, r"foo\bar"));
+        if MAIN_SEPARATOR == '\\' {
+            assert!(should_match_path(MatchPathMode::Auto, true, r"foo\\"));
+            assert!(should_match_path(MatchPathMode::Auto, true, r"foo\\bar"));
+            assert!(!should_match_path(MatchPathMode::Auto, true, r"foo\bar"));
         } else {
-            assert!(should_match_path(false, true, true, &format!("foo{}", SEP)));
             assert!(should_match_path(
-                false,
+                MatchPathMode::Auto,
                 true,
+                &format!("foo{}", MAIN_SEPARATOR)
+            ));
+            assert!(should_match_path(
+                MatchPathMode::Auto,
                 true,
-                &format!("foo{}bar", SEP)
+                &format!("foo{}bar", MAIN_SEPARATOR)
             ));
         }
+    }
+
+    #[test]
+    fn case_sensitive() {
+        assert!(should_be_case_sensitive(
+            CaseSensitivity::Sensitive,
+            false,
+            "foo"
+        ));
+
+        assert!(!should_be_case_sensitive(
+            CaseSensitivity::Insensitive,
+            false,
+            "foo"
+        ));
+
+        assert!(should_be_case_sensitive(
+            CaseSensitivity::Smart,
+            false,
+            "Foo"
+        ));
+
+        assert!(!should_be_case_sensitive(
+            CaseSensitivity::Smart,
+            false,
+            "foo"
+        ));
+
+        assert!(should_be_case_sensitive(
+            CaseSensitivity::Smart,
+            true,
+            "[A-Z]x"
+        ));
+
+        assert!(!should_be_case_sensitive(
+            CaseSensitivity::Smart,
+            true,
+            "[a-z]x"
+        ));
     }
 
     #[test]
@@ -283,7 +344,10 @@ mod tests {
         assert_eq!(match_detail.basename_matches(), vec![0..3]);
         assert_eq!(match_detail.path_matches(), vec![14..17]);
 
-        let query = QueryBuilder::new("bar").match_path(true).build().unwrap();
+        let query = QueryBuilder::new("bar")
+            .match_path_mode(MatchPathMode::Always)
+            .build()
+            .unwrap();
         let match_detail = MatchDetail {
             query: &query,
             basename: "barbaz",
@@ -293,7 +357,7 @@ mod tests {
         assert_eq!(match_detail.path_matches(), vec![7..10, 14..17]);
 
         let query = QueryBuilder::new("[0-9]+")
-            .match_path(true)
+            .match_path_mode(MatchPathMode::Always)
             .regex(true)
             .build()
             .unwrap();

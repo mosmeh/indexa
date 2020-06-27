@@ -51,10 +51,11 @@ indexa's configuration file is located at `~/.config/indexa/config.toml` on Unix
 
 ```
 USAGE:
-    ix.exe [FLAGS] [OPTIONS]
+    ix [FLAGS] [OPTIONS]
 
 FLAGS:
-    -s, --case-sensitive     Search case sensitively
+    -s, --case-sensitive     Search case-sensitively
+    -i, --ignore-case        Search case-insensitively
     -p, --match-path         Search in path
         --auto-match-path    Search in path when query contains path separators
     -r, --regex              Enable regex

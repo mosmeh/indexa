@@ -2,13 +2,18 @@
 
 [flags]
 # Default values for command-line flags.
-# Flags provided to CLI will override this ground of options.
+# Flags provided to CLI will override this group of options.
 
 # Initial query.
 # query = "blah blah"
 
-# Whether to search case sensitively.
+# Whether to search case-sensitively.
+# Defaults to smart case.
 # case_sensitive = false
+
+# Whether to search case-insensitively.
+# Defaults to smart case.
+# ignore_case = false
 
 # Whether to search in path.
 # match_path = false

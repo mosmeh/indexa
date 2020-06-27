@@ -1,7 +1,7 @@
 use crate::Opt;
 
 use indexa::database::StatusKind;
-use indexa::query::SortOrder;
+use indexa::query::{CaseSensitivity, MatchPathMode, SortOrder};
 
 use anyhow::{anyhow, Context, Result};
 use itertools::Itertools;
@@ -25,6 +25,7 @@ pub struct Config {
 pub struct FlagConfig {
     pub query: Option<String>,
     pub case_sensitive: bool,
+    pub ignore_case: bool,
     pub match_path: bool,
     pub auto_match_path: bool,
     pub regex: bool,
@@ -36,6 +37,7 @@ impl Default for FlagConfig {
         Self {
             query: None,
             case_sensitive: false,
+            ignore_case: false,
             match_path: false,
             auto_match_path: false,
             regex: false,
@@ -50,13 +52,44 @@ impl FlagConfig {
             self.query = Some(query.clone());
         }
 
-        self.case_sensitive |= opt.case_sensitive;
+        // HACK: case_sensitive takes precedence over ignore_case in config file
+        // TODO: make them mutually exclusive as in CLI flags
+        if self.case_sensitive && self.ignore_case {
+            self.case_sensitive = true;
+            self.ignore_case = false;
+        }
+
+        if opt.case_sensitive || opt.ignore_case {
+            self.case_sensitive = opt.case_sensitive;
+            self.ignore_case = opt.ignore_case;
+        }
+
         self.match_path |= opt.match_path;
         self.auto_match_path |= opt.auto_match_path;
         self.regex |= opt.regex;
 
         if let Some(threads) = opt.threads {
             self.threads = threads.min(num_cpus::get() - 1).max(1);
+        }
+    }
+
+    pub fn match_path_mode(&self) -> MatchPathMode {
+        if self.match_path {
+            MatchPathMode::Always
+        } else if self.auto_match_path {
+            MatchPathMode::Auto
+        } else {
+            MatchPathMode::Never
+        }
+    }
+
+    pub fn case_sensitivity(&self) -> CaseSensitivity {
+        if self.case_sensitive {
+            CaseSensitivity::Sensitive
+        } else if self.ignore_case {
+            CaseSensitivity::Insensitive
+        } else {
+            CaseSensitivity::Smart
         }
     }
 }
