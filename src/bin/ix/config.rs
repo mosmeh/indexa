@@ -4,13 +4,15 @@ use indexa::database::StatusKind;
 use indexa::query::SortOrder;
 
 use anyhow::{anyhow, Context, Result};
-use serde::{Deserialize, Serialize};
+use itertools::Itertools;
+use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use tui::style::Color;
 
-#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub flags: FlagConfig,
@@ -18,7 +20,7 @@ pub struct Config {
     pub ui: UIConfig,
 }
 
-#[derive(Debug, Serialize, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct FlagConfig {
     pub query: Option<String>,
@@ -59,7 +61,7 @@ impl FlagConfig {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
     pub location: Option<PathBuf>,
@@ -99,7 +101,7 @@ impl Default for DatabaseConfig {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct UIConfig {
     pub sort_by: StatusKind,
@@ -108,9 +110,9 @@ pub struct UIConfig {
     pub human_readable_size: bool,
     pub datetime_format: String,
     pub columns: Vec<Column>,
-
     pub unix: UIConfigUnix,
     pub windows: UIConfigWindows,
+    pub colors: ColorConfig,
 }
 
 impl Default for UIConfig {
@@ -141,11 +143,12 @@ impl Default for UIConfig {
             ],
             unix: Default::default(),
             windows: Default::default(),
+            colors: Default::default(),
         }
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct UIConfigUnix {
     pub mode_format: ModeFormatUnix,
@@ -159,7 +162,7 @@ impl Default for UIConfigUnix {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct UIConfigWindows {
     pub mode_format: ModeFormatWindows,
@@ -173,20 +176,47 @@ impl Default for UIConfigWindows {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ColorConfig {
+    #[serde(deserialize_with = "deserialize_color")]
+    pub selected_fg: Color,
+    #[serde(deserialize_with = "deserialize_color")]
+    pub selected_bg: Color,
+    #[serde(deserialize_with = "deserialize_color")]
+    pub matched_fg: Color,
+    #[serde(deserialize_with = "deserialize_color")]
+    pub matched_bg: Color,
+    #[serde(deserialize_with = "deserialize_color")]
+    pub prompt: Color,
+}
+
+impl Default for ColorConfig {
+    fn default() -> Self {
+        Self {
+            selected_fg: Color::LightBlue,
+            selected_bg: Color::Reset,
+            matched_fg: Color::Black,
+            matched_bg: Color::LightBlue,
+            prompt: Color::LightBlue,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
 pub struct Column {
     pub status: StatusKind,
     pub width: Option<u16>,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModeFormatUnix {
     Octal,
     Symbolic,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModeFormatWindows {
     Traditional,
@@ -237,13 +267,62 @@ where
     }
 }
 
+fn deserialize_color<'de, D>(deserializer: D) -> Result<Color, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let string = String::deserialize(deserializer)?;
+
+    match string.trim().to_lowercase().as_str() {
+        "reset" => Ok(Color::Reset),
+        "black" => Ok(Color::Black),
+        "red" => Ok(Color::Red),
+        "green" => Ok(Color::Green),
+        "yellow" => Ok(Color::Yellow),
+        "blue" => Ok(Color::Blue),
+        "magenta" => Ok(Color::Magenta),
+        "cyan" => Ok(Color::Cyan),
+        "gray" => Ok(Color::Gray),
+        "darkgray" => Ok(Color::DarkGray),
+        "lightred" => Ok(Color::LightRed),
+        "lightgreen" => Ok(Color::LightGreen),
+        "lightyellow" => Ok(Color::LightYellow),
+        "lightblue" => Ok(Color::LightBlue),
+        "lightmagenta" => Ok(Color::LightMagenta),
+        "lightcyan" => Ok(Color::LightCyan),
+        "white" => Ok(Color::White),
+        string => {
+            let components: Result<Vec<_>, _> = match string {
+                hex if hex.starts_with('#') && hex.len() == 4 => hex
+                    .chars()
+                    .skip(1)
+                    .map(|x| u8::from_str_radix(&format!("{}{}", x, x), 16))
+                    .collect(),
+                hex if hex.starts_with('#') && hex.len() == 7 => hex
+                    .chars()
+                    .skip(1)
+                    .tuples()
+                    .map(|(a, b)| u8::from_str_radix(&format!("{}{}", a, b), 16))
+                    .collect(),
+                rgb => rgb.split(',').map(|c| c.trim().parse::<u8>()).collect(),
+            };
+            if let Ok(components) = components {
+                if let [r, g, b] = *components {
+                    return Ok(Color::Rgb(r, g, b));
+                }
+            }
+            Err(serde::de::Error::custom("Invalid color"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
     #[test]
-    fn create_and_read() {
+    fn create_and_read_config() {
         let config_file = NamedTempFile::new().unwrap();
         let config_path = config_file.path();
 
@@ -256,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn empty() {
+    fn empty_config() {
         let empty_file = NamedTempFile::new().unwrap();
 
         let default_config: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
@@ -266,10 +345,33 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Invalid config file")]
-    fn invalid() {
+    fn invalid_config() {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "xxx").unwrap();
 
         read_or_create_config(Some(file.path())).unwrap();
+    }
+
+    #[test]
+    fn color() {
+        use serde::de::IntoDeserializer;
+        use tui::style::Color;
+
+        type Deserializer<'a> = serde::de::value::StrDeserializer<'a, serde::de::value::Error>;
+
+        let s: Deserializer = "blue".into_deserializer();
+        assert_eq!(deserialize_color(s), Ok(Color::Blue));
+
+        let s: Deserializer = "\t Red \r\n".into_deserializer();
+        assert_eq!(deserialize_color(s), Ok(Color::Red));
+
+        let s: Deserializer = "66, 135, 245".into_deserializer();
+        assert_eq!(deserialize_color(s), Ok(Color::Rgb(66, 135, 245)));
+
+        let s: Deserializer = "#E43".into_deserializer();
+        assert_eq!(deserialize_color(s), Ok(Color::Rgb(238, 68, 51)));
+
+        let s: Deserializer = "#fcba03".into_deserializer();
+        assert_eq!(deserialize_color(s), Ok(Color::Rgb(252, 186, 3)));
     }
 }

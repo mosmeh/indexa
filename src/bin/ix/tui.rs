@@ -192,7 +192,9 @@ impl<'a> TuiApp<'a> {
             .highlight_style(Style::default().fg(Color::Black).bg(Color::White))
             .prompt(Text::styled(
                 "> ",
-                Style::default().fg(Color::Blue).modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(self.config.ui.colors.prompt)
+                    .modifier(Modifier::BOLD),
             ));
         f.render_stateful_widget(text_box, chunks[3], &mut self.text_box_state);
     }
@@ -259,9 +261,21 @@ impl<'a> TuiApp<'a> {
         let table = Table::new(header, self.hits.iter(), display_func)
             .widths(&widths)
             .alignments(&alignments)
-            .selected_style(Style::default().fg(Color::Blue))
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Blue))
-            .selected_highlight_style(Style::default().fg(Color::Black).bg(Color::Blue))
+            .selected_style(
+                Style::default()
+                    .fg(self.config.ui.colors.selected_fg)
+                    .bg(self.config.ui.colors.selected_bg),
+            )
+            .highlight_style(
+                Style::default()
+                    .fg(self.config.ui.colors.matched_fg)
+                    .bg(self.config.ui.colors.matched_bg),
+            )
+            .selected_highlight_style(
+                Style::default()
+                    .fg(self.config.ui.colors.matched_fg)
+                    .bg(self.config.ui.colors.matched_bg),
+            )
             .selected_symbol("> ")
             .header_gap(1);
 

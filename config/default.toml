@@ -78,7 +78,7 @@ sort_dirs_before_files = false
 # Whether to show size in human readable format.
 human_readable_size = true
 
-# Datetime format for Created, Modified, and Accessed column.
+# Datetime format for Created, Modified, and Accessed columns.
 datetime_format = "%Y/%m/%d %T"
 
 # Columns from left to right.
@@ -107,3 +107,24 @@ mode_format = "symbolic"
 # Format of mode column.
 mode_format = "traditional"
 # mode_format = "powershell"
+
+[ui.colors]
+# Colors in one of following formats:
+# - Color name
+#     reset, black, white, red, green, yellow, blue, magenta, cyan, gray, darkgray,
+#     lightred, lightgreen, lightyellow, lightblue, lightmagenta, lightcyan
+# - RGB e.g. "66, 135, 245"
+# - Hex e.g. "#e43", "#fcba03"
+
+# Text (selected line)
+selected_fg = "lightblue"
+# Background (selected line)
+selected_bg = "reset"
+
+# Text (matched substring)
+matched_fg = "black"
+# Background (matched substring)
+matched_bg = "lightblue"
+
+# Prompt
+prompt = "lightblue"
