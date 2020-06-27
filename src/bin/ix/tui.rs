@@ -49,6 +49,7 @@ struct TuiApp<'a> {
     database: Option<Arc<Database>>,
     query: Option<Query>,
     hits: Vec<EntryId>,
+    search_in_progress: bool,
     query_tx: Option<Sender<Query>>,
     text_box_state: TextBoxState,
     table_state: TableState,
@@ -62,6 +63,7 @@ impl<'a> TuiApp<'a> {
             database: None,
             query: None,
             hits: Vec::new(),
+            search_in_progress: false,
             query_tx: None,
             text_box_state: TextBoxState::with_text(
                 config.flags.query.clone().unwrap_or_else(|| "".to_string()),
@@ -159,6 +161,12 @@ impl<'a> TuiApp<'a> {
         // status bar
         let text = [if self.database.is_none() {
             Text::raw("Loading database")
+        } else if self.search_in_progress {
+            Text::raw(format!(
+                "{} / {} [Searching]",
+                self.hits.len(),
+                self.database.as_ref().unwrap().num_entries()
+            ))
         } else {
             Text::raw(format!(
                 "{} / {}",
@@ -443,6 +451,7 @@ impl<'a> TuiApp<'a> {
 
     fn handle_search_result(&mut self, hits: Vec<EntryId>) -> Result<()> {
         self.hits = hits;
+        self.search_in_progress = false;
 
         if !self.hits.is_empty() {
             self.table_state
@@ -543,6 +552,7 @@ impl<'a> TuiApp<'a> {
 
         if let Ok(query) = query {
             self.query = Some(query.clone());
+            self.search_in_progress = true;
             self.query_tx.as_ref().unwrap().send(query)?;
         }
 
