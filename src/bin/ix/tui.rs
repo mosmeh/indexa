@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::SystemTime;
 use tui::backend::CrosstermBackend;
-use tui::layout::{Alignment, Constraint, Layout, Rect};
+use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Color, Modifier, Style};
 use tui::widgets::{Paragraph, Text};
 use tui::Frame;
@@ -39,17 +39,20 @@ pub fn run(config: &Config) -> Result<()> {
 type Backend = CrosstermBackend<io::Stderr>;
 
 enum State {
-    Continue,
+    Loading,
+    Ready,
+    Searching,
+    InvalidQuery(String),
     Aborted,
     Accepted,
 }
 
 struct TuiApp<'a> {
     config: &'a Config,
+    status: State,
     database: Option<Arc<Database>>,
     query: Option<Query>,
     hits: Vec<EntryId>,
-    search_in_progress: bool,
     query_tx: Option<Sender<Query>>,
     text_box_state: TextBoxState,
     table_state: TableState,
@@ -60,10 +63,10 @@ impl<'a> TuiApp<'a> {
     fn new(config: &'a Config) -> Result<Self> {
         let app = Self {
             config,
+            status: State::Loading,
             database: None,
             query: None,
             hits: Vec::new(),
-            search_in_progress: false,
             query_tx: None,
             text_box_state: TextBoxState::with_text(
                 config.flags.query.clone().unwrap_or_else(|| "".to_string()),
@@ -92,17 +95,21 @@ impl<'a> TuiApp<'a> {
         let database = loop {
             let terminal_width = terminal.size()?.width;
             terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
+
             crossbeam_channel::select! {
-                recv(load_rx) -> database => break Some(database??),
-                recv(input_rx) -> event => {
-                    match self.handle_input(event?)? {
-                        State::Aborted | State::Accepted => {
-                            cleanup_terminal(&mut terminal)?;
-                            break None;
-                        }
-                        _ => (),
-                    }
+                recv(load_rx) -> database => {
+                    self.status = State::Ready;
+                    break Some(database??);
+                },
+                recv(input_rx) -> event => self.handle_input(event?)?,
+            }
+
+            match self.status {
+                State::Aborted | State::Accepted => {
+                    cleanup_terminal(&mut terminal)?;
+                    break None;
                 }
+                _ => (),
             }
         };
 
@@ -120,24 +127,23 @@ impl<'a> TuiApp<'a> {
             loop {
                 let terminal_width = terminal.size()?.width;
                 terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
+
                 crossbeam_channel::select! {
-                    recv(result_rx) -> hits => {
-                        self.handle_search_result(hits?)?;
+                    recv(result_rx) -> hits => self.handle_search_result(hits?)?,
+                    recv(input_rx) -> event => self.handle_input(event?)?,
+                }
+
+                match self.status {
+                    State::Aborted => {
+                        cleanup_terminal(&mut terminal)?;
+                        break;
                     }
-                    recv(input_rx) -> event => {
-                        match self.handle_input(event?)? {
-                            State::Aborted => {
-                                cleanup_terminal(&mut terminal)?;
-                                break;
-                            },
-                            State::Accepted => {
-                                cleanup_terminal(&mut terminal)?;
-                                self.on_accept()?;
-                                break;
-                            }
-                            _ => (),
-                        }
+                    State::Accepted => {
+                        cleanup_terminal(&mut terminal)?;
+                        self.on_accept()?;
+                        break;
                     }
+                    _ => (),
                 }
             }
         }
@@ -159,23 +165,7 @@ impl<'a> TuiApp<'a> {
         self.draw_table(f, chunks[0], terminal_width);
 
         // status bar
-        let text = [if self.database.is_none() {
-            Text::raw("Loading database")
-        } else if self.search_in_progress {
-            Text::raw(format!(
-                "{} / {} [Searching]",
-                self.hits.len(),
-                self.database.as_ref().unwrap().num_entries()
-            ))
-        } else {
-            Text::raw(format!(
-                "{} / {}",
-                self.hits.len(),
-                self.database.as_ref().unwrap().num_entries()
-            ))
-        }];
-        let paragraph = Paragraph::new(text.iter());
-        f.render_widget(paragraph, chunks[1]);
+        self.draw_status_bar(f, chunks[1]);
 
         // path of selected row
         let text = vec![Text::raw(
@@ -302,6 +292,44 @@ impl<'a> TuiApp<'a> {
         );
     }
 
+    fn draw_status_bar(&self, f: &mut Frame<Backend>, area: Rect) {
+        let message = match &self.status {
+            State::Loading => Text::raw("Loading database"),
+            State::Searching => Text::raw("Searching"),
+            State::Ready | State::Aborted | State::Accepted => Text::raw("Ready"),
+            State::InvalidQuery(msg) => Text::styled(
+                msg,
+                Style::default().fg(self.config.ui.colors.error_fg).bg(self
+                    .config
+                    .ui
+                    .colors
+                    .error_bg),
+            ),
+        };
+
+        let counter = self
+            .database
+            .as_ref()
+            .map(|db| format!("{} / {}", self.hits.len(), db.num_entries()))
+            .unwrap_or_else(|| "".to_string());
+
+        let chunks = Layout::default()
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(counter.len() as u16 + 1),
+            ])
+            .direction(Direction::Horizontal)
+            .split(area);
+
+        let message = vec![message];
+        let message = Paragraph::new(message.iter());
+        f.render_widget(message, chunks[0]);
+
+        let counter = vec![Text::raw(counter)];
+        let counter = Paragraph::new(counter.iter()).alignment(Alignment::Right);
+        f.render_widget(counter, chunks[1]);
+    }
+
     fn display_column_content(
         &self,
         kind: &StatusKind,
@@ -380,21 +408,23 @@ impl<'a> TuiApp<'a> {
         })
     }
 
-    fn handle_input(&mut self, event: Event) -> Result<State> {
+    fn handle_input(&mut self, event: Event) -> Result<()> {
         match event {
-            Event::Key(key) => self.handle_key(key),
-            Event::Mouse(mouse) => self.handle_mouse(mouse),
-            Event::Resize(_, _) => Ok(State::Continue),
-        }
+            Event::Key(key) => self.handle_key(key)?,
+            Event::Mouse(mouse) => self.handle_mouse(mouse)?,
+            Event::Resize(_, _) => (),
+        };
+
+        Ok(())
     }
 
     #[allow(clippy::unnested_or_patterns, clippy::unknown_clippy_lints)]
-    fn handle_key(&mut self, key: KeyEvent) -> Result<State> {
+    fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc)
             | (KeyModifiers::CONTROL, KeyCode::Char('c'))
-            | (KeyModifiers::CONTROL, KeyCode::Char('g')) => return Ok(State::Aborted),
-            (_, KeyCode::Enter) => return Ok(State::Accepted),
+            | (KeyModifiers::CONTROL, KeyCode::Char('g')) => self.status = State::Aborted,
+            (_, KeyCode::Enter) => self.status = State::Accepted,
             (_, KeyCode::Up) | (KeyModifiers::CONTROL, KeyCode::Char('p')) => self.on_up()?,
             (_, KeyCode::Down) | (KeyModifiers::CONTROL, KeyCode::Char('n')) => self.on_down()?,
             (_, KeyCode::PageUp) => self.on_pageup()?,
@@ -436,22 +466,24 @@ impl<'a> TuiApp<'a> {
                 self.on_query_change()?;
             }
             _ => (),
-        }
-        Ok(State::Continue)
+        };
+
+        Ok(())
     }
 
-    fn handle_mouse(&mut self, mouse: MouseEvent) -> Result<State> {
+    fn handle_mouse(&mut self, mouse: MouseEvent) -> Result<()> {
         match mouse {
             MouseEvent::ScrollUp(_, _, _) => self.on_up()?,
             MouseEvent::ScrollDown(_, _, _) => self.on_down()?,
             _ => (),
         };
-        Ok(State::Continue)
+
+        Ok(())
     }
 
     fn handle_search_result(&mut self, hits: Vec<EntryId>) -> Result<()> {
         self.hits = hits;
-        self.search_in_progress = false;
+        self.status = State::Ready;
 
         if !self.hits.is_empty() {
             self.table_state
@@ -549,10 +581,23 @@ impl<'a> TuiApp<'a> {
             .sort_dirs_before_files(self.config.ui.sort_dirs_before_files)
             .build();
 
-        if let Ok(query) = query {
-            self.query = Some(query.clone());
-            self.search_in_progress = true;
-            self.query_tx.as_ref().unwrap().send(query)?;
+        match query {
+            Ok(query) => {
+                self.query = Some(query.clone());
+                self.status = State::Searching;
+                self.query_tx.as_ref().unwrap().send(query)?;
+            }
+            Err(err) => {
+                // HACK: extract last line to fit in status bar
+                self.status = State::InvalidQuery(
+                    err.to_string()
+                        .split('\n')
+                        .map(|s| s.trim())
+                        .last()
+                        .unwrap_or(&"")
+                        .to_string(),
+                );
+            }
         }
 
         Ok(())

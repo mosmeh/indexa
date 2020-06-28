@@ -134,5 +134,10 @@ matched_fg = "black"
 # Background (matched substring)
 matched_bg = "lightblue"
 
+# Text (error message)
+error_fg = "red"
+# Background (error message)
+error_bg = "reset"
+
 # Prompt
 prompt = "lightblue"

@@ -223,6 +223,10 @@ pub struct ColorConfig {
     #[serde(deserialize_with = "deserialize_color")]
     pub matched_bg: Color,
     #[serde(deserialize_with = "deserialize_color")]
+    pub error_fg: Color,
+    #[serde(deserialize_with = "deserialize_color")]
+    pub error_bg: Color,
+    #[serde(deserialize_with = "deserialize_color")]
     pub prompt: Color,
 }
 
@@ -233,6 +237,8 @@ impl Default for ColorConfig {
             selected_bg: Color::Reset,
             matched_fg: Color::Black,
             matched_bg: Color::LightBlue,
+            error_fg: Color::Red,
+            error_bg: Color::Reset,
             prompt: Color::LightBlue,
         }
     }

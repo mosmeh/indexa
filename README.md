@@ -4,7 +4,7 @@
 
 A locate alternative with incremental search
 
-![](screenshot.png)
+![](assets/screenshot.svg)
 
 ## Installation
 
