@@ -239,8 +239,8 @@ fn should_match_path(match_path_mode: MatchPathMode, regex: bool, pattern: &str)
         MatchPathMode::Always => true,
         MatchPathMode::Never => false,
         MatchPathMode::Auto => {
-            if regex && std::path::MAIN_SEPARATOR == '\\' {
-                pattern.contains(r"\\")
+            if regex {
+                regex_helper::pattern_has_path_separator(pattern)
             } else {
                 pattern.contains(std::path::MAIN_SEPARATOR)
             }
@@ -278,10 +278,30 @@ mod tests {
         ));
         assert!(!should_match_path(MatchPathMode::Auto, false, "foo"));
 
-        if MAIN_SEPARATOR == '\\' {
-            assert!(should_match_path(MatchPathMode::Auto, true, r"foo\\"));
-            assert!(should_match_path(MatchPathMode::Auto, true, r"foo\\bar"));
-            assert!(!should_match_path(MatchPathMode::Auto, true, r"foo\bar"));
+        if regex_syntax::is_meta_character(MAIN_SEPARATOR) {
+            // typically Windows, where MAIN_SEPARATOR is \
+
+            assert!(should_match_path(
+                MatchPathMode::Auto,
+                true,
+                &regex::escape(&format!(r"foo{}", MAIN_SEPARATOR))
+            ));
+            assert!(should_match_path(
+                MatchPathMode::Auto,
+                true,
+                &regex::escape(&format!(r"foo{}bar", MAIN_SEPARATOR))
+            ));
+            assert!(should_match_path(MatchPathMode::Auto, true, r"."));
+            assert!(!should_match_path(
+                MatchPathMode::Auto,
+                true,
+                &format!(r"foo{}", MAIN_SEPARATOR)
+            ));
+            assert!(!should_match_path(
+                MatchPathMode::Auto,
+                true,
+                &format!(r"[^{}]", regex::escape(&MAIN_SEPARATOR.to_string()))
+            ));
         } else {
             assert!(should_match_path(
                 MatchPathMode::Auto,
@@ -292,6 +312,12 @@ mod tests {
                 MatchPathMode::Auto,
                 true,
                 &format!("foo{}bar", MAIN_SEPARATOR)
+            ));
+            assert!(should_match_path(MatchPathMode::Auto, true, r"."));
+            assert!(!should_match_path(
+                MatchPathMode::Auto,
+                true,
+                &format!(r"[^{}]", MAIN_SEPARATOR)
             ));
         }
     }
