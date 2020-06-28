@@ -298,7 +298,7 @@ where
 
         eprintln!("Created a default configuration file at {}", path.display());
 
-        Ok(toml::from_str(DEFAULT_CONFIG)?)
+        Ok(Default::default())
     }
 }
 
@@ -358,24 +358,33 @@ mod tests {
 
     #[test]
     fn create_and_read_config() {
-        let config_file = NamedTempFile::new().unwrap();
-        let config_path = config_file.path();
+        let tmpdir = tempfile::tempdir().unwrap();
+        let nonexistent_file = tmpdir.path().join("config.toml");
+        let created_config = read_or_create_config(Some(&nonexistent_file)).unwrap();
 
-        let default_config: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
-        let created_config = read_or_create_config(Some(config_path)).unwrap();
-        assert_eq!(default_config, created_config);
+        let created_file = nonexistent_file;
+        let read_config = read_or_create_config(Some(created_file)).unwrap();
 
-        let read_config = read_or_create_config(Some(config_path)).unwrap();
         assert_eq!(created_config, read_config);
     }
 
     #[test]
-    fn empty_config() {
-        let empty_file = NamedTempFile::new().unwrap();
+    fn default_config_is_consistent() {
+        let from_str: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
+        let from_default_trait = Config::default();
 
-        let default_config: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
-        let config = read_or_create_config(Some(empty_file.path())).unwrap();
-        assert_eq!(default_config, config);
+        assert_eq!(from_str, from_default_trait);
+
+        let tmpdir = tempfile::tempdir().unwrap();
+        let nonexistent_file = tmpdir.path().join("config.toml");
+        let created = read_or_create_config(Some(nonexistent_file)).unwrap();
+
+        assert_eq!(from_str, created);
+
+        let empty_file = NamedTempFile::new().unwrap();
+        let written = read_or_create_config(Some(empty_file.path())).unwrap();
+
+        assert_eq!(from_str, written);
     }
 
     #[test]
