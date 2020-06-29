@@ -1,0 +1,51 @@
+[flags]
+auto_match_path = true
+
+[database]
+location = "database.db"
+index = [
+    "size",
+    "mode",
+    "created",
+    "modified",
+    "accessed",
+]
+fast_sort = [
+    "path",
+    "extension",
+    "size",
+    "mode",
+    "created",
+    "modified",
+    "accessed",
+]
+dirs = [
+    "."
+]
+
+[ui]
+sort_by = "modified"
+sort_order = "descending"
+sort_dirs_before_files = true
+
+[[ui.columns]]
+status = "basename"
+
+[[ui.columns]]
+status = "extension"
+width = 10
+
+[[ui.columns]]
+status = "size"
+width = 10
+
+[[ui.columns]]
+status = "mode"
+width = 10
+
+[[ui.columns]]
+status = "modified"
+width = 16
+
+[[ui.columns]]
+status = "path"

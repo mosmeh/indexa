@@ -14,11 +14,7 @@ fast_sort = [
 ]
 
 [ui]
-sort_by = "basename"
-sort_order = "ascending"
 sort_dirs_before_files = true
-human_readable_size = true
-datetime_format = "%Y-%m-%d %R"
 
 [[ui.columns]]
 status = "basename"
