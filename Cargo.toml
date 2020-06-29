@@ -4,6 +4,20 @@ version = "0.1.0"
 authors = ["mosm <airman515@gmail.com>"]
 edition = "2018"
 
+description = "A locate alternative with incremental search"
+repository = "https://github.com/mosmeh/indexa"
+documentation = "https://github.com/mosmeh/indexa"
+homepage = "https://github.com/mosmeh/indexa"
+
+readme = "README.md"
+license-file = "LICENSE"
+categories = ["command-line-utilities"]
+keywords = ["search", "files", "command-line"]
+exclude = [
+    "/assets",
+    "/config"
+]
+
 [lib]
 name = "indexa"
 path = "src/lib.rs"
@@ -11,6 +25,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "ix"
 path = "src/bin/ix/main.rs"
+doc = false
 
 [dependencies]
 anyhow = "1.0.31"
@@ -44,3 +59,7 @@ unicode-width = "0.1.7"
 
 [dev-dependencies]
 tempfile = "3.1.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
