@@ -3,9 +3,7 @@ use super::{Database, EntryId, EntryNode};
 use crate::query::{Query, SortOrder};
 use crate::{Error, Result};
 
-use itertools::Itertools;
 use rayon::prelude::*;
-use regex::Regex;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -45,30 +43,37 @@ impl Database {
             hits.push(AtomicBool::new(false));
         }
 
-        for (root_id, next_root_id) in self
-            .root_paths
-            .keys()
-            .copied()
-            .chain(std::iter::once(self.entries.len() as u32))
-            .tuple_windows()
-        {
-            let root_node = &self.entries[root_id as usize];
-            if query.regex().is_match(&self.basename_from_node(root_node)) {
-                (root_id..next_root_id).into_par_iter().try_for_each(|id| {
-                    if aborted.load(Ordering::Relaxed) {
-                        return Err(Error::SearchAbort);
-                    }
-                    hits[id as usize].store(true, Ordering::Relaxed);
-                    Ok(())
-                })?;
-            } else {
-                self.match_path_impl(
-                    root_node,
-                    Path::new(&self.basename_from_node(root_node)),
-                    &query.regex(),
-                    &hits,
-                    aborted.clone(),
-                )?;
+        if query.regex_enabled() {
+            for (root_id, root_path) in &self.root_paths {
+                let root_node = &self.entries[*root_id as usize];
+                if query.regex().is_match(&root_path.to_str().unwrap()) {
+                    hits[*root_id as usize].store(true, Ordering::Relaxed);
+                }
+
+                self.match_path_impl(root_node, &root_path, query, &hits, aborted.clone())?;
+            }
+        } else {
+            for ((root_id, root_path), next_root_id) in self.root_paths.iter().zip(
+                self.root_paths
+                    .keys()
+                    .skip(1)
+                    .copied()
+                    .chain(std::iter::once(self.entries.len() as u32)),
+            ) {
+                let root_node = &self.entries[*root_id as usize];
+                if query.regex().is_match(&root_path.to_str().unwrap()) {
+                    (*root_id..next_root_id)
+                        .into_par_iter()
+                        .try_for_each(|id| {
+                            if aborted.load(Ordering::Relaxed) {
+                                return Err(Error::SearchAbort);
+                            }
+                            hits[id as usize].store(true, Ordering::Relaxed);
+                            Ok(())
+                        })?;
+                } else {
+                    self.match_path_impl(root_node, &root_path, query, &hits, aborted.clone())?;
+                }
             }
         }
 
@@ -89,7 +94,7 @@ impl Database {
         &self,
         node: &EntryNode,
         path: &Path,
-        regex: &Regex,
+        query: &Query,
         hits: &[AtomicBool],
         aborted: Arc<AtomicBool>,
     ) -> Result<()> {
@@ -103,14 +108,22 @@ impl Database {
                 let child = &self.entries[id as usize];
                 let child_path = path.join(&self.basename_from_node(child));
                 if let Some(s) = child_path.to_str() {
-                    if regex.is_match(s) {
+                    if query.regex_enabled() {
+                        if query.regex().is_match(s) {
+                            hits[id as usize].store(true, Ordering::Relaxed);
+                        }
+
+                        if child.has_any_child() {
+                            self.match_path_impl(child, &child_path, query, hits, aborted.clone())?;
+                        }
+                    } else if query.regex().is_match(s) {
                         hits[id as usize].store(true, Ordering::Relaxed);
 
                         if child.has_any_child() {
                             self.match_all_descendants(child, hits, aborted.clone())?;
                         }
                     } else if child.has_any_child() {
-                        self.match_path_impl(child, &child_path, regex, hits, aborted.clone())?;
+                        self.match_path_impl(child, &child_path, query, hits, aborted.clone())?;
                     }
                 }
 

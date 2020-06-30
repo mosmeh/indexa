@@ -11,6 +11,7 @@ use std::ops::Range;
 pub struct Query {
     regex: Regex,
     match_path: bool,
+    regex_enabled: bool,
     sort_by: StatusKind,
     sort_order: SortOrder,
     sort_dirs_before_files: bool,
@@ -25,6 +26,11 @@ impl Query {
     #[inline]
     pub fn match_path(&self) -> bool {
         self.match_path
+    }
+
+    #[inline]
+    pub fn regex_enabled(&self) -> bool {
+        self.regex_enabled
     }
 
     #[inline]
@@ -164,6 +170,7 @@ impl<'a> QueryBuilder<'a> {
         Ok(Query {
             regex,
             match_path: should_match_path(self.match_path_mode, self.regex, &self.pattern),
+            regex_enabled: self.regex,
             sort_by: self.sort_by,
             sort_order: self.sort_order,
             sort_dirs_before_files: self.sort_dirs_before_files,
