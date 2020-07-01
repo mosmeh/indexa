@@ -425,32 +425,31 @@ fn generate_sorted_ids(
     sorted_ids
 }
 
-// taken from https://github.com/BurntSushi/ripgrep/blob/1b2c1dc67583d70d1d16fc93c90db80bead4fb09/crates/ignore/src/pathutil.rs#L6-L46
 #[cfg(unix)]
 #[inline]
-fn is_hidden(dent: &DirEntry) -> bool {
+pub fn is_hidden(dent: &DirEntry) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
-    if let Some(name) = dent.path().file_name() {
-        name.as_bytes().get(0) == Some(&b'.')
-    } else {
-        false
-    }
+    dent.path()
+        .file_name()
+        .map(|filename| filename.as_bytes().get(0) == Some(&b'.'))
+        .unwrap_or(false)
 }
 
 #[cfg(windows)]
 #[inline]
-fn is_hidden(dent: &DirEntry) -> bool {
+pub fn is_hidden(dent: &DirEntry) -> bool {
     if let Ok(metadata) = dent.metadata() {
         if Mode::from(&metadata).is_hidden() {
             return true;
         }
     }
-    if let Some(name) = dent.path().file_name() {
-        name.to_str().map(|s| s.starts_with('.')).unwrap_or(false)
-    } else {
-        false
-    }
+
+    dent.path()
+        .file_name()
+        .and_then(|filename| filename.to_str())
+        .map(|s| s.starts_with('.'))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
