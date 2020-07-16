@@ -54,7 +54,7 @@ fast_sort = [
     # "accessed",
 ]
 
-# Root directories to index. Defaults to / on Unix and C:\ on Windows.
+# Root directories to index. Defaults to / on Unix and %HOMEDRIVE%\ (usually C:\) on Windows.
 # dirs = [
 #     "/",
 # ]

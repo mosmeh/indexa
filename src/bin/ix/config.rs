@@ -113,13 +113,8 @@ impl Default for DatabaseConfig {
             path
         });
 
-        let default_root = if cfg!(windows) {
-            PathBuf::from(r"C:\")
-        } else {
-            PathBuf::from("/")
-        };
-        let dirs = if default_root.exists() {
-            vec![default_root]
+        let dirs = if let Some(root_dir) = get_default_root_dir() {
+            vec![root_dir]
         } else {
             Vec::new()
         };
@@ -354,6 +349,31 @@ where
             }
             Err(serde::de::Error::custom("Invalid color"))
         }
+    }
+}
+
+#[cfg(windows)]
+fn get_default_root_dir() -> Option<PathBuf> {
+    if let Ok(homedrive) = std::env::var("HOMEDRIVE") {
+        let path = PathBuf::from(homedrive + "\\");
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    if PathBuf::from(r"C:\").exists() {
+        Some(PathBuf::from(r"C:\"))
+    } else {
+        None
+    }
+}
+
+#[cfg(not(windows))]
+fn get_default_root_dir() -> Option<PathBuf> {
+    if PathBuf::from("/").exists() {
+        Some(PathBuf::from("/"))
+    } else {
+        None
     }
 }
 
