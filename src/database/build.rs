@@ -7,8 +7,7 @@ use enum_map::{enum_map, EnumMap};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::fs::{DirEntry, FileType, Metadata};
-use std::io;
+use std::fs::{self, FileType, Metadata};
 use std::mem;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -124,7 +123,9 @@ impl DatabaseBuilder {
         let database = Arc::new(Mutex::new(database));
 
         for path in dirs {
-            if let Ok(mut root_info) = EntryInfo::from_path(&path, &self.index_flags) {
+            if let Ok(mut root_info) =
+                EntryInfo::from_path(&path, &self.index_flags, self.ignore_hidden)
+            {
                 if !root_info.ftype.is_dir() {
                     continue;
                 }
@@ -146,7 +147,7 @@ impl DatabaseBuilder {
                         database.clone(),
                         &self.index_flags,
                         self.ignore_hidden,
-                        &dir_entries,
+                        dir_entries,
                         root_node_id,
                     );
                 }
@@ -258,15 +259,38 @@ impl EntryStatus {
     }
 }
 
+struct DirEntry {
+    name: String,
+    metadata: Metadata,
+    path: PathBuf,
+    ftype: FileType,
+}
+
+impl DirEntry {
+    fn from_fs_dir_entry(dent: fs::DirEntry) -> Result<Self> {
+        let name = dent
+            .file_name()
+            .to_str()
+            .ok_or(Error::NonUtf8Path)?
+            .to_string();
+        Ok(Self {
+            name,
+            metadata: dent.metadata()?,
+            path: dent.path(),
+            ftype: dent.file_type()?,
+        })
+    }
+}
+
 struct EntryInfo {
     name: String,
-    ftype: FileType,
     status: EntryStatus,
-    dir_entries: Option<Vec<io::Result<DirEntry>>>,
+    dir_entries: Option<Vec<DirEntry>>,
+    ftype: FileType,
 }
 
 impl EntryInfo {
-    fn from_path(path: &Path, index_flags: &StatusFlags) -> Result<Self> {
+    fn from_path(path: &Path, index_flags: &StatusFlags, ignore_hidden: bool) -> Result<Self> {
         let name = util::get_basename(path)
             .to_str()
             .ok_or(Error::NonUtf8Path)?
@@ -275,71 +299,77 @@ impl EntryInfo {
         let ftype = metadata.file_type();
 
         if ftype.is_dir() {
-            let (dir_entries, num_children) = if let Ok(rd) = path.read_dir() {
-                let dir_entries = rd.collect::<Vec<_>>();
-                let num_children = dir_entries.len();
-                (Some(dir_entries), num_children)
-            } else {
-                (None, 0)
-            };
+            let (dir_entries, num_children) = get_dir_entries(path, ignore_hidden);
 
             Ok(Self {
                 name,
-                ftype,
                 status: EntryStatus::from_metadata_with_size(
-                    Some(num_children as u64),
+                    Some(num_children),
                     &metadata,
                     index_flags,
                 )?,
                 dir_entries,
+                ftype,
             })
         } else {
             Ok(Self {
                 name,
-                ftype,
                 status: EntryStatus::from_metadata(&metadata, index_flags)?,
                 dir_entries: None,
+                ftype,
             })
         }
     }
 
-    fn from_dir_entry(dent: &DirEntry, index_flags: &StatusFlags) -> Result<Self> {
-        let name = dent
-            .file_name()
-            .to_str()
-            .ok_or(Error::NonUtf8Path)?
-            .to_string();
-        let ftype = dent.file_type()?;
-
-        if ftype.is_dir() {
-            let path = dent.path();
-
-            let (dir_entries, num_children) = if let Ok(rd) = path.read_dir() {
-                let dir_entries = rd.collect::<Vec<_>>();
-                let num_children = dir_entries.len();
-                (Some(dir_entries), num_children)
-            } else {
-                (None, 0)
-            };
+    fn from_dir_entry(
+        dent: DirEntry,
+        index_flags: &StatusFlags,
+        ignore_hidden: bool,
+    ) -> Result<Self> {
+        if dent.ftype.is_dir() {
+            let (dir_entries, num_children) = get_dir_entries(&dent.path, ignore_hidden);
 
             Ok(Self {
-                name,
-                ftype,
+                name: dent.name,
+                ftype: dent.ftype,
                 status: EntryStatus::from_metadata_with_size(
-                    Some(num_children as u64),
-                    &dent.metadata()?,
+                    Some(num_children),
+                    &dent.metadata,
                     index_flags,
                 )?,
                 dir_entries,
             })
         } else {
             Ok(Self {
-                name,
-                ftype,
-                status: EntryStatus::from_metadata(&dent.metadata()?, index_flags)?,
+                name: dent.name,
+                ftype: dent.ftype,
+                status: EntryStatus::from_metadata(&dent.metadata, index_flags)?,
                 dir_entries: None,
             })
         }
+    }
+}
+
+fn get_dir_entries(path: &Path, ignore_hidden: bool) -> (Option<Vec<DirEntry>>, u64) {
+    if let Ok(rd) = path.read_dir() {
+        let fs_dir_entries: Vec<_> = rd.collect();
+        let num_children = fs_dir_entries.len();
+
+        let dir_entries = fs_dir_entries
+            .into_iter()
+            .filter_map(|dent| {
+                dent.ok().and_then(|dent| {
+                    if ignore_hidden && is_hidden(&dent) {
+                        return None;
+                    }
+                    DirEntry::from_fs_dir_entry(dent).ok()
+                })
+            })
+            .collect();
+
+        (Some(dir_entries), num_children as u64)
+    } else {
+        (None, 0)
     }
 }
 
@@ -347,25 +377,18 @@ fn walk_file_system(
     database: Arc<Mutex<Database>>,
     index_flags: &StatusFlags,
     ignore_hidden: bool,
-    dir_entries: &[io::Result<DirEntry>],
+    dir_entries: Vec<DirEntry>,
     parent: u32,
 ) {
     let (mut child_dirs, child_files) = dir_entries
-        .iter()
-        .filter_map(|dent| {
-            dent.as_ref().ok().and_then(|dent| {
-                if ignore_hidden && is_hidden(dent) {
-                    return None;
-                }
-                EntryInfo::from_dir_entry(&dent, index_flags).ok()
-            })
-        })
+        .into_iter()
+        .filter_map(|dent| EntryInfo::from_dir_entry(dent, index_flags, ignore_hidden).ok())
         .partition::<Vec<_>, _>(|info| info.ftype.is_dir());
 
-    let sub_dir_entries = child_dirs
+    let sub_dir_entries: Vec<_> = child_dirs
         .iter_mut()
         .map(|info| mem::replace(&mut info.dir_entries, None))
-        .collect::<Vec<_>>();
+        .collect();
 
     let (dir_start, dir_end) = {
         let mut db = database.lock();
@@ -387,16 +410,14 @@ fn walk_file_system(
 
     (dir_start..dir_end)
         .into_par_iter()
-        .zip(sub_dir_entries.par_iter())
-        .filter_map(|(index, dir_entries)| {
-            dir_entries.as_ref().map(|dir_entries| (index, dir_entries))
-        })
+        .zip(sub_dir_entries.into_par_iter())
+        .filter_map(|(index, dir_entries)| dir_entries.map(|dir_entries| (index, dir_entries)))
         .for_each_with(database, |database, (index, dir_entries)| {
             walk_file_system(
                 database.clone(),
                 index_flags,
                 ignore_hidden,
-                &dir_entries,
+                dir_entries,
                 index,
             );
         });
@@ -427,7 +448,7 @@ fn generate_sorted_ids(
 
 #[cfg(unix)]
 #[inline]
-pub fn is_hidden(dent: &DirEntry) -> bool {
+pub fn is_hidden(dent: &fs::DirEntry) -> bool {
     use std::os::unix::ffi::OsStrExt;
 
     dent.path()
@@ -438,7 +459,7 @@ pub fn is_hidden(dent: &DirEntry) -> bool {
 
 #[cfg(windows)]
 #[inline]
-pub fn is_hidden(dent: &DirEntry) -> bool {
+pub fn is_hidden(dent: &fs::DirEntry) -> bool {
     if let Ok(metadata) = dent.metadata() {
         if Mode::from(&metadata).is_hidden() {
             return true;
