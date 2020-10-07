@@ -197,6 +197,7 @@ impl<'a> TuiApp<'a> {
         f.render_stateful_widget(text_box, chunks[3], &mut self.text_box_state);
     }
 
+    #[allow(clippy::needless_collect)] // false positive
     fn draw_table(&mut self, f: &mut Frame<Backend>, area: Rect, terminal_width: u16) {
         let columns = &self.config.ui.columns;
 
@@ -418,7 +419,6 @@ impl<'a> TuiApp<'a> {
         Ok(())
     }
 
-    #[allow(clippy::unnested_or_patterns, clippy::unknown_clippy_lints)]
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc)
