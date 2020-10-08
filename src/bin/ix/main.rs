@@ -12,16 +12,16 @@ use rayon::ThreadPoolBuilder;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use structopt::StructOpt;
+use structopt::{clap::AppSettings, StructOpt};
 
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "indexa",
     author = env!("CARGO_PKG_AUTHORS"),
     rename_all = "kebab-case",
-    setting(clap::AppSettings::ColoredHelp),
-    setting(clap::AppSettings::DeriveDisplayOrder),
-    setting(clap::AppSettings::AllArgsOverrideSelf)
+    setting(AppSettings::ColoredHelp),
+    setting(AppSettings::DeriveDisplayOrder),
+    setting(AppSettings::AllArgsOverrideSelf)
 )]
 pub struct Opt {
     /// Initial query.
