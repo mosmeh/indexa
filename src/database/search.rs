@@ -4,9 +4,11 @@ use crate::query::{Query, SortOrder};
 use crate::{Error, Result};
 
 use rayon::prelude::*;
+use regex::Regex;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use thread_local::ThreadLocal;
 
 impl Database {
     pub fn search(&self, query: &Query, aborted: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
@@ -24,12 +26,18 @@ impl Database {
     }
 
     fn match_basename(&self, query: &Query, aborted: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+        // Since rust-lang/regex@e040c1b, regex library stopped using thread_local,
+        // which had a performance impact on indexa.
+        // We mitigate it by putting Regex in thread local storage.
+        let regex_tls = ThreadLocal::new();
+
         self.collect_hits(query, |(id, node)| {
             if aborted.load(Ordering::Relaxed) {
                 return Some(Err(Error::SearchAbort));
             }
 
-            if query.regex().is_match(&self.basename_from_node(node)) {
+            let regex = regex_tls.get_or(|| query.regex().clone());
+            if regex.is_match(&self.basename_from_node(node)) {
                 Some(Ok(EntryId(id)))
             } else {
                 None
@@ -43,6 +51,8 @@ impl Database {
             hits.push(AtomicBool::new(false));
         }
 
+        let regex_tls = ThreadLocal::new();
+
         if query.regex_enabled() {
             for (root_id, root_path) in &self.root_paths {
                 let root_node = &self.entries[*root_id as usize];
@@ -50,7 +60,7 @@ impl Database {
                     hits[*root_id as usize].store(true, Ordering::Relaxed);
                 }
 
-                self.match_path_impl(root_node, &root_path, query, &hits, aborted)?;
+                self.match_path_impl(root_node, &root_path, query, &regex_tls, &hits, aborted)?;
             }
         } else {
             for ((root_id, root_path), next_root_id) in self.root_paths.iter().zip(
@@ -72,7 +82,7 @@ impl Database {
                             Ok(())
                         })?;
                 } else {
-                    self.match_path_impl(root_node, &root_path, query, &hits, aborted)?;
+                    self.match_path_impl(root_node, &root_path, query, &regex_tls, &hits, aborted)?;
                 }
             }
         }
@@ -95,9 +105,12 @@ impl Database {
         node: &EntryNode,
         path: &Path,
         query: &Query,
+        regex_tls: &ThreadLocal<Regex>,
         hits: &[AtomicBool],
         aborted: &Arc<AtomicBool>,
     ) -> Result<()> {
+        let regex = regex_tls.get_or(|| query.regex().clone());
+
         (node.child_start..node.child_end)
             .into_par_iter()
             .try_for_each(|id| {
@@ -109,21 +122,28 @@ impl Database {
                 let child_path = path.join(&self.basename_from_node(child));
                 if let Some(s) = child_path.to_str() {
                     if query.regex_enabled() {
-                        if query.regex().is_match(s) {
+                        if regex.is_match(s) {
                             hits[id as usize].store(true, Ordering::Relaxed);
                         }
 
                         if child.has_any_child() {
-                            self.match_path_impl(child, &child_path, query, hits, aborted)?;
+                            self.match_path_impl(
+                                child,
+                                &child_path,
+                                query,
+                                regex_tls,
+                                hits,
+                                aborted,
+                            )?;
                         }
-                    } else if query.regex().is_match(s) {
+                    } else if regex.is_match(s) {
                         hits[id as usize].store(true, Ordering::Relaxed);
 
                         if child.has_any_child() {
                             self.match_all_descendants(child, hits, aborted)?;
                         }
                     } else if child.has_any_child() {
-                        self.match_path_impl(child, &child_path, query, hits, aborted)?;
+                        self.match_path_impl(child, &child_path, query, regex_tls, hits, aborted)?;
                     }
                 }
 
