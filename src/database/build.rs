@@ -11,7 +11,6 @@ use std::fs::{self, FileType, Metadata};
 use std::mem;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::SystemTime;
 
 type StatusFlags = EnumMap<StatusKind, bool>;
@@ -120,7 +119,7 @@ impl DatabaseBuilder {
             sorted_ids: EnumMap::default(),
         };
 
-        let database = Arc::new(Mutex::new(database));
+        let database = Mutex::new(database);
 
         for path in dirs {
             if let Ok(mut root_info) =
@@ -144,7 +143,7 @@ impl DatabaseBuilder {
 
                 if let Some(dir_entries) = dir_entries {
                     walk_file_system(
-                        database.clone(),
+                        &database,
                         &self.index_flags,
                         self.ignore_hidden,
                         dir_entries,
@@ -154,8 +153,7 @@ impl DatabaseBuilder {
             }
         }
 
-        // safe to unwrap since above codes are the only users of database at the moment
-        let mut database = Arc::try_unwrap(database).unwrap().into_inner();
+        let mut database = database.into_inner();
 
         database.sorted_ids =
             generate_sorted_ids(&database, &self.index_flags, &self.fast_sort_flags);
@@ -374,7 +372,7 @@ fn get_dir_entries(path: &Path, ignore_hidden: bool) -> (Option<Vec<DirEntry>>, 
 }
 
 fn walk_file_system(
-    database: Arc<Mutex<Database>>,
+    database: &Mutex<Database>,
     index_flags: &StatusFlags,
     ignore_hidden: bool,
     dir_entries: Vec<DirEntry>,
@@ -413,13 +411,7 @@ fn walk_file_system(
         .zip(sub_dir_entries.into_par_iter())
         .filter_map(|(index, dir_entries)| dir_entries.map(|dir_entries| (index, dir_entries)))
         .for_each_with(database, |database, (index, dir_entries)| {
-            walk_file_system(
-                database.clone(),
-                index_flags,
-                ignore_hidden,
-                dir_entries,
-                index,
-            );
+            walk_file_system(database, index_flags, ignore_hidden, dir_entries, index);
         });
 }
 
