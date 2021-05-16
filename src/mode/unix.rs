@@ -1,7 +1,9 @@
 use super::{HasFlag, Mode};
-use std::fmt::{self, Write};
-use std::fs::Metadata;
-use std::os::unix::fs::MetadataExt;
+use std::{
+    fmt::{self, Write},
+    fs::Metadata,
+    os::unix::fs::MetadataExt,
+};
 
 const S_IFMT: u32 = 0xf000;
 const S_IFIFO: u32 = 0x1000;

@@ -1,11 +1,12 @@
 mod regex_helper;
 
-use crate::database::{Entry, StatusKind};
-use crate::{Error, Result};
+use crate::{
+    database::{Entry, StatusKind},
+    Error, Result,
+};
 use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
-use std::borrow::Cow;
-use std::ops::Range;
+use std::{borrow::Cow, ops::Range};
 
 #[derive(Clone)]
 pub struct Query {

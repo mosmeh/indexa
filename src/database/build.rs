@@ -1,17 +1,17 @@
-use super::util;
-use super::{Database, EntryId, EntryNode, StatusKind};
-use crate::mode::Mode;
-use crate::{Error, Result};
+use super::{util, Database, EntryId, EntryNode, StatusKind};
+use crate::{mode::Mode, Error, Result};
 
 use enum_map::{enum_map, EnumMap};
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use std::collections::HashMap;
-use std::fs::{self, FileType, Metadata};
-use std::mem;
-use std::ops::Range;
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::{
+    collections::HashMap,
+    fs::{self, FileType, Metadata},
+    mem,
+    ops::Range,
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 type StatusFlags = EnumMap<StatusKind, bool>;
 
@@ -469,8 +469,7 @@ pub fn is_hidden(dent: &fs::DirEntry) -> bool {
 mod tests {
     use crate::database::*;
     use itertools::Itertools;
-    use std::fs;
-    use std::path::Path;
+    use std::{fs, path::Path};
     use strum::IntoEnumIterator;
     use tempfile::TempDir;
 

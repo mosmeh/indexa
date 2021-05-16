@@ -1,7 +1,9 @@
 use super::{HasFlag, Mode};
-use std::fmt::{self, Write};
-use std::fs::Metadata;
-use std::os::windows::fs::MetadataExt;
+use std::{
+    fmt::{self, Write},
+    fs::Metadata,
+    os::windows::fs::MetadataExt,
+};
 
 const FILE_ATTRIBUTE_READONLY: u32 = 0x00000001;
 const FILE_ATTRIBUTE_HIDDEN: u32 = 0x00000002;

@@ -1,7 +1,9 @@
 // idea from https://github.com/sharkdp/fd/blob/6f2c8cdf914aca3ec19809d5b661f124d2935900/src/regex_helper.rs
 
-use regex_syntax::hir::{Class, Group, Hir, HirKind, Literal, Repetition};
-use regex_syntax::ParserBuilder;
+use regex_syntax::{
+    hir::{Class, Group, Hir, HirKind, Literal, Repetition},
+    ParserBuilder,
+};
 
 pub fn pattern_has_path_separator(pattern: &str) -> bool {
     let mut parser = ParserBuilder::new().allow_invalid_utf8(true).build();

@@ -1,7 +1,9 @@
-use tui::buffer::Buffer;
-use tui::layout::Rect;
-use tui::style::Style;
-use tui::widgets::{Paragraph, StatefulWidget, Text, Widget};
+use tui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::Style,
+    widgets::{Paragraph, StatefulWidget, Text, Widget},
+};
 use unicode_segmentation::{GraphemeCursor, UnicodeSegmentation};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 

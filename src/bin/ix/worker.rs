@@ -1,13 +1,19 @@
-use indexa::database::{Database, EntryId};
-use indexa::query::Query;
+use indexa::{
+    database::{Database, EntryId},
+    query::Query,
+};
 
 use anyhow::Result;
 use crossbeam_channel::{self, Receiver, Sender};
-use std::fs;
-use std::path::Path;
-use std::sync::atomic::{self, AtomicBool};
-use std::sync::Arc;
-use std::thread;
+use std::{
+    fs,
+    path::Path,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
+    thread,
+};
 
 pub struct Loader;
 

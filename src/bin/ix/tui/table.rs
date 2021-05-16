@@ -23,18 +23,24 @@
 
 // originally from https://github.com/fdehau/tui-rs/blob/72511867624c9bc416e64a1b856026ced5c4e1eb/src/widgets/table.rs
 
-use cassowary::strength::{MEDIUM, REQUIRED, WEAK};
-use cassowary::WeightedRelation::*;
-use cassowary::{Expression, Solver};
+use cassowary::{
+    strength::{MEDIUM, REQUIRED, WEAK},
+    Expression, Solver,
+    WeightedRelation::*,
+};
 use itertools::izip;
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::iter::{self, Iterator};
-use std::ops::Range;
-use tui::buffer::Buffer;
-use tui::layout::{Alignment, Constraint, Rect};
-use tui::style::Style;
-use tui::widgets::{Block, Paragraph, StatefulWidget, Text, Widget};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    iter::{self, Iterator},
+    ops::Range,
+};
+use tui::{
+    buffer::Buffer,
+    layout::{Alignment, Constraint, Rect},
+    style::Style,
+    widgets::{Block, Paragraph, StatefulWidget, Text, Widget},
+};
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone)]

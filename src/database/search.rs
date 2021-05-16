@@ -1,13 +1,18 @@
-use super::util;
-use super::{Database, EntryId, EntryNode};
-use crate::query::{Query, SortOrder};
-use crate::{Error, Result};
+use super::{util, Database, EntryId, EntryNode};
+use crate::{
+    query::{Query, SortOrder},
+    Error, Result,
+};
 
 use rayon::prelude::*;
 use regex::Regex;
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::{
+    path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 use thread_local::ThreadLocal;
 
 impl Database {

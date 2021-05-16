@@ -8,9 +8,7 @@ use crate::mode::Mode;
 
 use enum_map::{Enum, EnumMap};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::SystemTime;
+use std::{collections::HashMap, path::PathBuf, time::SystemTime};
 use strum_macros::{Display, EnumIter};
 
 #[derive(Debug, Serialize, Deserialize)]

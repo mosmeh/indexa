@@ -1,15 +1,19 @@
 use crate::Opt;
 
-use indexa::database::StatusKind;
-use indexa::query::{CaseSensitivity, MatchPathMode, SortOrder};
+use indexa::{
+    database::StatusKind,
+    query::{CaseSensitivity, MatchPathMode, SortOrder},
+};
 
 use anyhow::{anyhow, Context, Result};
 use itertools::Itertools;
 use serde::{Deserialize, Deserializer};
-use std::borrow::Cow;
-use std::fs::{self, File};
-use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::{
+    borrow::Cow,
+    fs::{self, File},
+    io::{BufWriter, Write},
+    path::{Path, PathBuf},
+};
 use tui::style::Color;
 
 #[derive(Debug, Default, PartialEq, Deserialize)]

@@ -1,8 +1,10 @@
 use super::{Entry, StatusKind};
 
-use std::cmp::Ordering;
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::{
+    cmp::Ordering,
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 /// Canonicalize all paths.
 /// Removes non-UTF-8 paths and redundant subdirectories.

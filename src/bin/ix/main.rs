@@ -9,9 +9,11 @@ use indexa::database::DatabaseBuilder;
 use anyhow::{anyhow, Result};
 use dialoguer::Confirm;
 use rayon::ThreadPoolBuilder;
-use std::fs::{self, File};
-use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{self, File},
+    io::{BufWriter, Write},
+    path::{Path, PathBuf},
+};
 use structopt::{clap::AppSettings, StructOpt};
 
 #[derive(Debug, StructOpt)]

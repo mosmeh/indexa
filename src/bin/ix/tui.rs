@@ -1,36 +1,38 @@
 mod table;
 mod text_box;
 
-use crate::config::Config;
-use crate::worker::{Loader, Searcher};
+use crate::{
+    config::Config,
+    worker::{Loader, Searcher},
+};
 
 use table::{HighlightableText, Row, Table, TableState};
 use text_box::{TextBox, TextBoxState};
 
-use indexa::database::{Database, Entry, EntryId, StatusKind};
-use indexa::mode::Mode;
-use indexa::query::{MatchDetail, Query, QueryBuilder, SortOrder};
+use indexa::{
+    database::{Database, Entry, EntryId, StatusKind},
+    mode::Mode,
+    query::{MatchDetail, Query, QueryBuilder, SortOrder},
+};
 
 use anyhow::Result;
-use chrono::offset::Local;
-use chrono::DateTime;
+use chrono::{offset::Local, DateTime};
 use crossbeam_channel::{self, Sender};
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-    MouseEvent, MouseEventKind,
+use crossterm::{
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseEvent, MouseEventKind,
+    },
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use std::io;
-use std::ops::Range;
-use std::sync::Arc;
-use std::thread;
-use std::time::SystemTime;
-use tui::backend::CrosstermBackend;
-use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::style::{Color, Modifier, Style};
-use tui::widgets::{Paragraph, Text};
-use tui::Frame;
-use tui::Terminal;
+use std::{io, ops::Range, sync::Arc, thread, time::SystemTime};
+use tui::{
+    backend::CrosstermBackend,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    widgets::{Paragraph, Text},
+    Frame, Terminal,
+};
 
 pub fn run(config: &Config) -> Result<()> {
     TuiApp::new(config)?.run()
