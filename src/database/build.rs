@@ -117,7 +117,7 @@ impl DatabaseBuilder {
             } else {
                 None
             },
-            sorted_ids: EnumMap::new(),
+            sorted_ids: EnumMap::default(),
         };
 
         let database = Arc::new(Mutex::new(database));
@@ -428,7 +428,7 @@ fn generate_sorted_ids(
     index_flags: &StatusFlags,
     fast_sort_flags: &StatusFlags,
 ) -> EnumMap<StatusKind, Option<Vec<u32>>> {
-    let mut sorted_ids = EnumMap::new();
+    let mut sorted_ids = EnumMap::default();
     for (kind, key) in sorted_ids.iter_mut() {
         if index_flags[kind] && fast_sort_flags[kind] {
             let compare_func = util::build_compare_func(kind);

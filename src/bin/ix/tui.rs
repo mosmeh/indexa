@@ -17,10 +17,10 @@ use chrono::DateTime;
 use crossbeam_channel::{self, Sender};
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-    MouseEvent,
+    MouseEvent, MouseEventKind,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
-use std::io::{self, Write};
+use std::io;
 use std::ops::Range;
 use std::sync::Arc;
 use std::thread;
@@ -472,9 +472,9 @@ impl<'a> TuiApp<'a> {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent) -> Result<()> {
-        match mouse {
-            MouseEvent::ScrollUp(_, _, _) => self.on_up()?,
-            MouseEvent::ScrollDown(_, _, _) => self.on_down()?,
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.on_up()?,
+            MouseEventKind::ScrollDown => self.on_down()?,
             _ => (),
         };
 
