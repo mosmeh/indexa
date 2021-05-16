@@ -92,7 +92,7 @@ fn main() -> Result<()> {
     } else if !db_location.exists() {
         let yes = Confirm::new()
             .with_prompt("Database is not created yet. Create it now?")
-            .interact_on(&console::Term::stderr())
+            .interact_on(&dialoguer::console::Term::stderr())
             .unwrap_or(false);
         if yes {
             create_database(db_location, &config)?;

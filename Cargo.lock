@@ -329,7 +329,6 @@ dependencies = [
  "bincode",
  "cassowary",
  "chrono",
- "console",
  "crossbeam-channel",
  "crossterm 0.19.0",
  "dialoguer",
