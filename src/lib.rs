@@ -1,3 +1,6 @@
+pub use enum_map;
+pub use strum;
+
 pub mod database;
 mod error;
 pub mod mode;
