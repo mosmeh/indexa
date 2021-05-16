@@ -47,7 +47,7 @@ impl StatefulWidget for TextBox<'_> {
             if i == state.grapheme_cursor.cur_cursor() {
                 Text::styled(grapheme, self.highlight_style)
             } else {
-                Text::raw(grapheme)
+                Text::styled(grapheme, self.style)
             }
         }));
         if state.grapheme_cursor.cur_cursor() >= state.text.len() {

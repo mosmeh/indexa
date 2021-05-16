@@ -299,7 +299,7 @@ where
             alignments.iter().collect()
         } else {
             iter::repeat(&Alignment::Left)
-                .take(self.widths.iter().count())
+                .take(self.widths.len())
                 .collect()
         };
 

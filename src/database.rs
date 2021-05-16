@@ -80,7 +80,7 @@ impl Database {
     }
 
     #[inline]
-    fn path_vec_from_id<'a>(&'a self, id: u32) -> Vec<&'a str> {
+    fn path_vec_from_id(&self, id: u32) -> Vec<&str> {
         let node = &self.entries[id as usize];
         if node.parent == id {
             // root node
