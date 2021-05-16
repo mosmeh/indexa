@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 impl Database {
-    pub fn search(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+    pub fn search(&self, query: &Query, aborted: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
         if query.is_empty() {
             self.match_all(query)
         } else if query.match_path() {
@@ -23,7 +23,7 @@ impl Database {
         self.collect_hits(query, |(id, _)| Some(Ok(EntryId(id))))
     }
 
-    fn match_basename(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+    fn match_basename(&self, query: &Query, aborted: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
         self.collect_hits(query, |(id, node)| {
             if aborted.load(Ordering::Relaxed) {
                 return Some(Err(Error::SearchAbort));
@@ -37,7 +37,7 @@ impl Database {
         })
     }
 
-    fn match_path(&self, query: &Query, aborted: Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+    fn match_path(&self, query: &Query, aborted: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
         let mut hits = Vec::with_capacity(self.entries.len());
         for _ in 0..self.entries.len() {
             hits.push(AtomicBool::new(false));
@@ -50,7 +50,7 @@ impl Database {
                     hits[*root_id as usize].store(true, Ordering::Relaxed);
                 }
 
-                self.match_path_impl(root_node, &root_path, query, &hits, aborted.clone())?;
+                self.match_path_impl(root_node, &root_path, query, &hits, aborted)?;
             }
         } else {
             for ((root_id, root_path), next_root_id) in self.root_paths.iter().zip(
@@ -72,7 +72,7 @@ impl Database {
                             Ok(())
                         })?;
                 } else {
-                    self.match_path_impl(root_node, &root_path, query, &hits, aborted.clone())?;
+                    self.match_path_impl(root_node, &root_path, query, &hits, aborted)?;
                 }
             }
         }
@@ -96,7 +96,7 @@ impl Database {
         path: &Path,
         query: &Query,
         hits: &[AtomicBool],
-        aborted: Arc<AtomicBool>,
+        aborted: &Arc<AtomicBool>,
     ) -> Result<()> {
         (node.child_start..node.child_end)
             .into_par_iter()
@@ -114,16 +114,16 @@ impl Database {
                         }
 
                         if child.has_any_child() {
-                            self.match_path_impl(child, &child_path, query, hits, aborted.clone())?;
+                            self.match_path_impl(child, &child_path, query, hits, aborted)?;
                         }
                     } else if query.regex().is_match(s) {
                         hits[id as usize].store(true, Ordering::Relaxed);
 
                         if child.has_any_child() {
-                            self.match_all_descendants(child, hits, aborted.clone())?;
+                            self.match_all_descendants(child, hits, aborted)?;
                         }
                     } else if child.has_any_child() {
-                        self.match_path_impl(child, &child_path, query, hits, aborted.clone())?;
+                        self.match_path_impl(child, &child_path, query, hits, aborted)?;
                     }
                 }
 
@@ -135,7 +135,7 @@ impl Database {
         &self,
         node: &EntryNode,
         hits: &[AtomicBool],
-        aborted: Arc<AtomicBool>,
+        aborted: &Arc<AtomicBool>,
     ) -> Result<()> {
         (node.child_start..node.child_end)
             .into_par_iter()
@@ -148,7 +148,7 @@ impl Database {
 
                 let child = &self.entries[id as usize];
                 if child.has_any_child() {
-                    self.match_all_descendants(child, hits, aborted.clone())?;
+                    self.match_all_descendants(child, hits, aborted)?;
                 }
 
                 Ok(())

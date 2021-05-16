@@ -89,7 +89,7 @@ impl SearcherImpl {
                     let aborted_clone = aborted.clone();
 
                     thread::spawn(move || {
-                        let hits = database.search(&query, aborted.clone());
+                        let hits = database.search(&query, &aborted);
                         if let Ok(hits) = hits {
                             if !aborted.load(atomic::Ordering::Relaxed) {
                                 let _ = tx_clone.send(hits);
