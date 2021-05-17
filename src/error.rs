@@ -11,8 +11,6 @@ pub enum Error {
     InvalidOption(String),
     #[error("Encountered non-UTF-8 path")]
     NonUtf8Path,
-    #[error("Could not get filename")]
-    NoFilename,
     #[error("Search aborted")]
     SearchAbort,
 }
