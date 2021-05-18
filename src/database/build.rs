@@ -383,7 +383,11 @@ fn walk_file_system(
         .filter_map(|dent| EntryInfo::from_dir_entry(dent, index_flags, ignore_hidden).ok())
         .partition::<Vec<_>, _>(|info| info.ftype.is_dir());
 
-    let sub_dir_entries: Vec<_> = child_dirs
+    if child_dirs.is_empty() && child_files.is_empty() {
+        return;
+    }
+
+    let child_dir_entries: Vec<_> = child_dirs
         .iter_mut()
         .map(|info| mem::replace(&mut info.dir_entries, None))
         .collect();
@@ -408,8 +412,15 @@ fn walk_file_system(
 
     (dir_start..dir_end)
         .into_par_iter()
-        .zip(sub_dir_entries.into_par_iter())
-        .filter_map(|(index, dir_entries)| dir_entries.map(|dir_entries| (index, dir_entries)))
+        .zip(child_dir_entries.into_par_iter())
+        .filter_map(|(index, dir_entries)| {
+            if let Some(dir_entries) = dir_entries {
+                if !dir_entries.is_empty() {
+                    return Some((index, dir_entries));
+                }
+            }
+            None
+        })
         .for_each_with(database, |database, (index, dir_entries)| {
             walk_file_system(database, index_flags, ignore_hidden, dir_entries, index);
         });
