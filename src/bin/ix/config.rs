@@ -365,20 +365,14 @@ fn get_default_root_dir() -> Option<PathBuf> {
         }
     }
 
-    if PathBuf::from(r"C:\").exists() {
-        Some(PathBuf::from(r"C:\"))
-    } else {
-        None
-    }
+    let path = PathBuf::from(r"C:\");
+    path.exists().then(|| path)
 }
 
 #[cfg(not(windows))]
 fn get_default_root_dir() -> Option<PathBuf> {
-    if PathBuf::from("/").exists() {
-        Some(PathBuf::from("/"))
-    } else {
-        None
-    }
+    let path = PathBuf::from("/");
+    path.exists().then(|| path)
 }
 
 #[cfg(test)]

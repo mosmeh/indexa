@@ -42,11 +42,9 @@ impl Database {
             }
 
             let regex = regex_tls.get_or(|| query.regex().clone());
-            if regex.is_match(&self.basename_from_node(node)) {
-                Some(Ok(EntryId(id)))
-            } else {
-                None
-            }
+            regex
+                .is_match(&self.basename_from_node(node))
+                .then(|| Ok(EntryId(id)))
         })
     }
 
@@ -97,11 +95,9 @@ impl Database {
                 return Some(Err(Error::SearchAbort));
             }
 
-            if hits[id as usize].load(Ordering::Relaxed) {
-                Some(Ok(EntryId(id)))
-            } else {
-                None
-            }
+            hits[id as usize]
+                .load(Ordering::Relaxed)
+                .then(|| Ok(EntryId(id)))
         })
     }
 

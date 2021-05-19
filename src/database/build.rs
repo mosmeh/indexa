@@ -91,31 +91,11 @@ impl DatabaseBuilder {
             name_arena: String::new(),
             entries: Vec::new(),
             root_paths: HashMap::with_capacity(dirs.len()),
-            size: if self.index_flags[StatusKind::Size] {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            mode: if self.index_flags[StatusKind::Mode] {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            created: if self.index_flags[StatusKind::Created] {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            modified: if self.index_flags[StatusKind::Modified] {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            accessed: if self.index_flags[StatusKind::Accessed] {
-                Some(Vec::new())
-            } else {
-                None
-            },
+            size: self.index_flags[StatusKind::Size].then(Vec::new),
+            mode: self.index_flags[StatusKind::Mode].then(Vec::new),
+            created: self.index_flags[StatusKind::Created].then(Vec::new),
+            modified: self.index_flags[StatusKind::Modified].then(Vec::new),
+            accessed: self.index_flags[StatusKind::Accessed].then(Vec::new),
             sorted_ids: EnumMap::default(),
         };
 
@@ -210,12 +190,7 @@ struct EntryStatus {
 
 impl EntryStatus {
     fn from_metadata(metadata: &Metadata, index_flags: &StatusFlags) -> Result<Self> {
-        let size = if index_flags[StatusKind::Size] {
-            Some(metadata.len())
-        } else {
-            None
-        };
-
+        let size = index_flags[StatusKind::Size].then(|| metadata.len());
         Self::from_metadata_with_size(size, metadata, index_flags)
     }
 
@@ -224,11 +199,7 @@ impl EntryStatus {
         metadata: &Metadata,
         index_flags: &StatusFlags,
     ) -> Result<Self> {
-        let mode = if index_flags[StatusKind::Mode] {
-            Some(metadata.into())
-        } else {
-            None
-        };
+        let mode = index_flags[StatusKind::Mode].then(|| metadata.into());
 
         let created = if index_flags[StatusKind::Created] {
             Some(util::sanitize_system_time(&metadata.created()?))
