@@ -77,6 +77,24 @@ where
     Highlighted(String, M),
 }
 
+impl<M> Default for HighlightableText<M>
+where
+    M: Iterator<Item = Range<usize>>,
+{
+    fn default() -> Self {
+        Self::Raw(String::new())
+    }
+}
+
+impl<M> From<String> for HighlightableText<M>
+where
+    M: Iterator<Item = Range<usize>>,
+{
+    fn from(s: String) -> Self {
+        Self::Raw(s)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Row<M, D>
 where
@@ -325,7 +343,7 @@ where
                     width: *w,
                     height: 1,
                 };
-                let text = Text::styled(format!("{}", t), self.header_style);
+                let text = Text::styled(t.to_string(), self.header_style);
                 Paragraph::new(vec![&text].into_iter())
                     .alignment(alignment)
                     .render(area, buf);

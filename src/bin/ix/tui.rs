@@ -210,7 +210,7 @@ impl<'a> TuiApp<'a> {
                     SortOrder::Descending => format!("{}▼", column.status),
                 }
             } else {
-                format!("{}", column.status)
+                column.status.to_string()
             }
         });
 
@@ -219,10 +219,7 @@ impl<'a> TuiApp<'a> {
             let match_detail = self.query.as_ref().unwrap().match_detail(&entry).unwrap();
             let contents = columns
                 .iter()
-                .map(|column| {
-                    self.display_column_content(&column.status, &entry, &match_detail)
-                        .unwrap_or_else(|| HighlightableText::Raw("".to_string()))
-                })
+                .map(|column| self.format_column_content(&column.status, &entry, &match_detail))
                 .collect::<Vec<_>>();
             Row::new(contents.into_iter())
         };
@@ -333,84 +330,87 @@ impl<'a> TuiApp<'a> {
         f.render_widget(counter, chunks[1]);
     }
 
-    fn display_column_content(
+    fn format_column_content(
         &self,
         kind: &StatusKind,
         entry: &Entry,
         match_detail: &MatchDetail,
-    ) -> Option<HighlightableText<impl Iterator<Item = Range<usize>>>> {
+    ) -> HighlightableText<impl Iterator<Item = Range<usize>>> {
         match kind {
-            StatusKind::Basename => Some(HighlightableText::Highlighted(
+            StatusKind::Basename => HighlightableText::Highlighted(
                 entry.basename().to_string(),
                 match_detail.basename_matches().into_iter(),
-            )),
-
-            StatusKind::FullPath => Some(HighlightableText::Highlighted(
+            ),
+            StatusKind::FullPath => HighlightableText::Highlighted(
                 match_detail.path_str().to_string(),
                 match_detail.path_matches().into_iter(),
-            )),
+            ),
             StatusKind::Extension => entry
                 .extension()
-                .map(|s| HighlightableText::Raw(s.to_string())),
-            StatusKind::Size => self
-                .display_size(entry.size().ok(), entry.is_dir())
-                .map(HighlightableText::Raw),
-            StatusKind::Mode => self
-                .display_mode(entry.mode().ok())
-                .map(HighlightableText::Raw),
-            StatusKind::Created => self
-                .display_datetime(entry.created().ok())
-                .map(HighlightableText::Raw),
-            StatusKind::Modified => self
-                .display_datetime(entry.modified().ok())
-                .map(HighlightableText::Raw),
-            StatusKind::Accessed => self
-                .display_datetime(entry.accessed().ok())
-                .map(HighlightableText::Raw),
+                .map(|s| s.to_string().into())
+                .unwrap_or_default(),
+            StatusKind::Size => entry
+                .size()
+                .map(|size| self.format_size(size, entry.is_dir()).into())
+                .unwrap_or_default(),
+            StatusKind::Mode => entry
+                .mode()
+                .map(|mode| self.format_mode(mode).into())
+                .unwrap_or_default(),
+            StatusKind::Created => entry
+                .created()
+                .map(|created| self.format_datetime(created).into())
+                .unwrap_or_default(),
+            StatusKind::Modified => entry
+                .modified()
+                .map(|modified| self.format_datetime(modified).into())
+                .unwrap_or_default(),
+            StatusKind::Accessed => entry
+                .accessed()
+                .map(|accessed| self.format_datetime(accessed).into())
+                .unwrap_or_default(),
         }
     }
 
-    fn display_size(&self, size: Option<u64>, is_dir: bool) -> Option<String> {
-        size.map(|s| {
-            if is_dir {
-                if s == 1 {
-                    format!("{} item", s)
-                } else {
-                    format!("{} items", s)
-                }
-            } else if self.config.ui.human_readable_size {
-                size::Size::Bytes(s).to_string(size::Base::Base2, size::Style::Abbreviated)
+    fn format_size(&self, size: u64, is_dir: bool) -> String {
+        if is_dir {
+            if size == 1 {
+                format!("{} item", size)
             } else {
-                format!("{}", s)
+                format!("{} items", size)
             }
-        })
+        } else if self.config.ui.human_readable_size {
+            size::Size::Bytes(size).to_string(size::Base::Base2, size::Style::Abbreviated)
+        } else {
+            size.to_string()
+        }
     }
 
-    #[cfg(unix)]
-    fn display_mode(&self, mode: Option<Mode>) -> Option<String> {
-        use crate::config::ModeFormatUnix;
+    fn format_mode(&self, mode: Mode) -> String {
+        #[cfg(unix)]
+        {
+            use crate::config::ModeFormatUnix;
 
-        mode.map(|m| match self.config.ui.unix.mode_format {
-            ModeFormatUnix::Octal => format!("{}", m.display_octal()),
-            ModeFormatUnix::Symbolic => format!("{}", m.display_symbolic()),
-        })
+            match self.config.ui.unix.mode_format {
+                ModeFormatUnix::Octal => mode.display_octal().to_string(),
+                ModeFormatUnix::Symbolic => mode.display_symbolic().to_string(),
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            use crate::config::ModeFormatWindows;
+
+            match self.config.ui.windows.mode_format {
+                ModeFormatWindows::Traditional => mode.display_traditional().to_string(),
+                ModeFormatWindows::PowerShell => mode.display_powershell().to_string(),
+            }
+        }
     }
 
-    #[cfg(windows)]
-    fn display_mode(&self, mode: Option<Mode>) -> Option<String> {
-        use crate::config::ModeFormatWindows;
-
-        mode.map(|m| match self.config.ui.windows.mode_format {
-            ModeFormatWindows::Traditional => format!("{}", m.display_traditional()),
-            ModeFormatWindows::PowerShell => format!("{}", m.display_powershell()),
-        })
-    }
-
-    fn display_datetime(&self, time: Option<SystemTime>) -> Option<String> {
-        time.map(|t| {
-            let datetime = DateTime::<Local>::from(t);
-            format!("{}", datetime.format(&self.config.ui.datetime_format))
-        })
+    fn format_datetime(&self, time: SystemTime) -> String {
+        let datetime = DateTime::<Local>::from(time);
+        datetime.format(&self.config.ui.datetime_format).to_string()
     }
 
     fn handle_input(&mut self, event: Event) -> Result<()> {
