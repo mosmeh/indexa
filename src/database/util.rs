@@ -1,4 +1,5 @@
 use super::{Entry, StatusKind};
+use crate::{Error, Result};
 
 use std::{
     cmp::Ordering,
@@ -6,30 +7,28 @@ use std::{
     time::SystemTime,
 };
 
-/// Canonicalize all paths.
-/// Removes non-UTF-8 paths and redundant subdirectories.
-pub fn canonicalize_dirs<P>(dirs: &[P]) -> Vec<PathBuf>
+/// Canonicalize all paths and remove all redundant subdirectories
+pub fn canonicalize_dirs<P>(dirs: &[P]) -> Result<Vec<PathBuf>>
 where
     P: AsRef<Path>,
 {
     let mut dirs = dirs
         .iter()
-        .filter_map(|path| {
-            if let Ok(canonicalized) = dunce::canonicalize(path) {
-                if let Some(path_str) = canonicalized.to_str() {
-                    let path_str = path_str.to_string();
-                    return Some((canonicalized, path_str));
-                }
-            }
-            None
+        .map(|path| {
+            let canonicalized = dunce::canonicalize(path)?;
+            let path_str = canonicalized
+                .to_str()
+                .ok_or(Error::NonUtf8Path)?
+                .to_string();
+            Ok((canonicalized, path_str))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
 
     // we use str::starts_with, because Path::starts_with doesn't work well for Windows paths
     dirs.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
     dirs.dedup_by(|(_, a), (_, b)| a.starts_with(&b as &str));
 
-    dirs.iter().map(|(path, _)| path).cloned().collect()
+    Ok(dirs.into_iter().map(|(path, _)| path).collect())
 }
 
 pub fn get_basename(path: &Path) -> &std::ffi::OsStr {
@@ -88,11 +87,10 @@ pub fn sanitize_system_time(time: &SystemTime) -> SystemTime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn test_canonicalize_dirs() {
-        use std::fs;
-
         let tmpdir = tempfile::tempdir().unwrap();
         let path = tmpdir.path();
 
@@ -102,33 +100,39 @@ mod tests {
             path.join("e"),
             path.join("b/c"),
             path.join("a/b"),
-            PathBuf::new(),
             path.join("b/c/d"),
             path.join("e/a/b"),
             path.join("e/."),
         ];
         for dir in &dirs {
-            fs::create_dir_all(dir).unwrap();
+            std::fs::create_dir_all(dir).unwrap();
         }
 
         assert_eq!(
-            canonicalize_dirs(&dirs),
+            canonicalize_dirs(&dirs).unwrap(),
             vec![path.join("a"), path.join("b/c"), path.join("e")]
                 .iter()
                 .map(|p| dunce::canonicalize(p).unwrap())
                 .collect::<Vec<_>>()
         );
 
-        assert!(canonicalize_dirs::<PathBuf>(&[]).is_empty());
-        assert!(canonicalize_dirs(&[PathBuf::new()]).is_empty());
+        assert!(canonicalize_dirs::<PathBuf>(&[]).unwrap().is_empty());
 
         let tmpdir = tempfile::tempdir().unwrap();
         let path = tmpdir.path();
         std::env::set_current_dir(path).unwrap();
         assert_eq!(
-            canonicalize_dirs(&[Path::new(".")]),
+            canonicalize_dirs(&[Path::new(".")]).unwrap(),
             vec![dunce::canonicalize(path).unwrap()]
         );
+    }
+
+    #[test]
+    #[should_panic]
+    fn canonicalize_non_existent_dir() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let dir = tmpdir.path().join("xxxx");
+        canonicalize_dirs(&[dir]).unwrap();
     }
 
     #[cfg(unix)]

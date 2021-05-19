@@ -85,7 +85,7 @@ impl DatabaseBuilder {
             }
         }
 
-        let dirs = util::canonicalize_dirs(&self.dirs);
+        let dirs = util::canonicalize_dirs(&self.dirs)?;
 
         let database = Database {
             name_arena: String::new(),
@@ -566,9 +566,14 @@ mod tests {
     fn empty_database() {
         let database = DatabaseBuilder::new().build().unwrap();
         assert_eq!(database.num_entries(), 0);
+    }
 
-        let database = DatabaseBuilder::new().add_dir("xxxx").build().unwrap();
-        assert_eq!(database.num_entries(), 0);
+    #[test]
+    #[should_panic]
+    fn nonexistent_root_dir() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let dir = tmpdir.path().join("xxxx");
+        DatabaseBuilder::new().add_dir(dir).build().unwrap();
     }
 
     #[test]
