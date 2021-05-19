@@ -353,17 +353,19 @@ impl<'a> TuiApp<'a> {
                 .extension()
                 .map(|s| HighlightableText::Raw(s.to_string())),
             StatusKind::Size => self
-                .display_size(entry.size(), entry.is_dir())
+                .display_size(entry.size().ok(), entry.is_dir())
                 .map(HighlightableText::Raw),
-            StatusKind::Mode => self.display_mode(entry.mode()).map(HighlightableText::Raw),
+            StatusKind::Mode => self
+                .display_mode(entry.mode().ok())
+                .map(HighlightableText::Raw),
             StatusKind::Created => self
-                .display_datetime(entry.created())
+                .display_datetime(entry.created().ok())
                 .map(HighlightableText::Raw),
             StatusKind::Modified => self
-                .display_datetime(entry.modified())
+                .display_datetime(entry.modified().ok())
                 .map(HighlightableText::Raw),
             StatusKind::Accessed => self
-                .display_datetime(entry.accessed())
+                .display_datetime(entry.accessed().ok())
                 .map(HighlightableText::Raw),
         }
     }

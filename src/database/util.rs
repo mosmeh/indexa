@@ -48,27 +48,32 @@ pub fn build_compare_func(
         }),
         StatusKind::Size => Box::new(|a, b| {
             a.size()
-                .cmp(&b.size())
+                .ok()
+                .cmp(&b.size().ok())
                 .then_with(|| a.basename().cmp(b.basename()))
         }),
         StatusKind::Mode => Box::new(|a, b| {
             a.mode()
-                .cmp(&b.mode())
+                .ok()
+                .cmp(&b.mode().ok())
                 .then_with(|| a.basename().cmp(b.basename()))
         }),
         StatusKind::Created => Box::new(|a, b| {
             a.created()
-                .cmp(&b.created())
+                .ok()
+                .cmp(&b.created().ok())
                 .then_with(|| a.basename().cmp(b.basename()))
         }),
         StatusKind::Modified => Box::new(|a, b| {
             a.modified()
-                .cmp(&b.modified())
+                .ok()
+                .cmp(&b.modified().ok())
                 .then_with(|| a.basename().cmp(b.basename()))
         }),
         StatusKind::Accessed => Box::new(|a, b| {
             a.accessed()
-                .cmp(&b.accessed())
+                .ok()
+                .cmp(&b.accessed().ok())
                 .then_with(|| a.basename().cmp(b.basename()))
         }),
     }

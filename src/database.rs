@@ -4,7 +4,7 @@ mod util;
 
 pub use build::DatabaseBuilder;
 
-use crate::mode::Mode;
+use crate::{mode::Mode, Result};
 
 use enum_map::{Enum, EnumMap};
 use serde::{Deserialize, Serialize};
@@ -155,80 +155,71 @@ impl<'a> Entry<'a> {
     }
 
     #[inline]
-    pub fn size(&self) -> Option<u64> {
-        self.database
-            .size
-            .as_ref()
-            .map(|v| v[self.id.0 as usize])
-            .or_else(|| {
-                if self.is_dir() {
-                    self.path().read_dir().map(|rd| rd.count() as u64).ok()
-                } else {
-                    self.path()
-                        .symlink_metadata()
-                        .map(|metadata| metadata.len())
-                        .ok()
-                }
-            })
+    pub fn size(&self) -> Result<u64> {
+        if let Some(size) = &self.database.size {
+            return Ok(size[self.id.0 as usize]);
+        }
+
+        let size = if self.is_dir() {
+            self.path().read_dir().map(|rd| rd.count() as u64)?
+        } else {
+            self.path()
+                .symlink_metadata()
+                .map(|metadata| metadata.len())?
+        };
+
+        Ok(size)
     }
 
     #[inline]
-    pub fn mode(&self) -> Option<Mode> {
-        self.database
-            .mode
-            .as_ref()
-            .map(|v| v[self.id.0 as usize])
-            .or_else(|| {
-                self.path()
-                    .symlink_metadata()
-                    .map(|metadata| Mode::from(&metadata))
-                    .ok()
-            })
+    pub fn mode(&self) -> Result<Mode> {
+        if let Some(mode) = &self.database.mode {
+            return Ok(mode[self.id.0 as usize]);
+        }
+
+        self.path()
+            .symlink_metadata()
+            .map(|metadata| Mode::from(&metadata))
+            .map_err(Into::into)
     }
 
     #[inline]
-    pub fn created(&self) -> Option<SystemTime> {
-        self.database
-            .created
-            .as_ref()
-            .map(|v| v[self.id.0 as usize])
-            .or_else(|| {
-                self.path()
-                    .symlink_metadata()
-                    .ok()
-                    .and_then(|metadata| metadata.created().ok())
-                    .map(|created| util::sanitize_system_time(&created))
-            })
+    pub fn created(&self) -> Result<SystemTime> {
+        if let Some(created) = &self.database.created {
+            return Ok(created[self.id.0 as usize]);
+        }
+
+        self.path()
+            .symlink_metadata()
+            .and_then(|metadata| metadata.created())
+            .map(|created| util::sanitize_system_time(&created))
+            .map_err(Into::into)
     }
 
     #[inline]
-    pub fn modified(&self) -> Option<SystemTime> {
-        self.database
-            .modified
-            .as_ref()
-            .map(|v| v[self.id.0 as usize])
-            .or_else(|| {
-                self.path()
-                    .symlink_metadata()
-                    .ok()
-                    .and_then(|metadata| metadata.modified().ok())
-                    .map(|modified| util::sanitize_system_time(&modified))
-            })
+    pub fn modified(&self) -> Result<SystemTime> {
+        if let Some(modified) = &self.database.modified {
+            return Ok(modified[self.id.0 as usize]);
+        }
+
+        self.path()
+            .symlink_metadata()
+            .and_then(|metadata| metadata.modified())
+            .map(|modified| util::sanitize_system_time(&modified))
+            .map_err(Into::into)
     }
 
     #[inline]
-    pub fn accessed(&self) -> Option<SystemTime> {
-        self.database
-            .accessed
-            .as_ref()
-            .map(|v| v[self.id.0 as usize])
-            .or_else(|| {
-                self.path()
-                    .symlink_metadata()
-                    .ok()
-                    .and_then(|metadata| metadata.accessed().ok())
-                    .map(|accessed| util::sanitize_system_time(&accessed))
-            })
+    pub fn accessed(&self) -> Result<SystemTime> {
+        if let Some(accessed) = &self.database.accessed {
+            return Ok(accessed[self.id.0 as usize]);
+        }
+
+        self.path()
+            .symlink_metadata()
+            .and_then(|metadata| metadata.accessed())
+            .map(|accessed| util::sanitize_system_time(&accessed))
+            .map_err(Into::into)
     }
 
     #[inline]
