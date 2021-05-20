@@ -34,12 +34,12 @@ impl<'a> TuiApp<'a> {
             }
             (_, KeyCode::Backspace) | (KeyModifiers::CONTROL, KeyCode::Char('h')) => {
                 if self.text_box_state.on_backspace() {
-                    self.on_query_change()?;
+                    self.handle_query_change()?;
                 }
             }
             (_, KeyCode::Delete) | (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
                 if self.text_box_state.on_delete() {
-                    self.on_query_change()?;
+                    self.handle_query_change()?;
                 }
             }
             (_, KeyCode::Left) | (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
@@ -56,11 +56,11 @@ impl<'a> TuiApp<'a> {
             }
             (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
                 self.text_box_state.clear();
-                self.on_query_change()?;
+                self.handle_query_change()?;
             }
             (_, KeyCode::Char(c)) => {
                 self.text_box_state.on_char(c);
-                self.on_query_change()?;
+                self.handle_query_change()?;
             }
             _ => (),
         };
@@ -147,7 +147,7 @@ impl<'a> TuiApp<'a> {
         Ok(())
     }
 
-    pub fn on_accept(&self) -> Result<()> {
+    pub fn handle_accept(&self) -> Result<()> {
         if let Some(id) = self.hits.get(self.table_state.selected()) {
             println!(
                 "{}",
@@ -163,7 +163,7 @@ impl<'a> TuiApp<'a> {
         Ok(())
     }
 
-    pub fn on_query_change(&mut self) -> Result<()> {
+    pub fn handle_query_change(&mut self) -> Result<()> {
         if self.database.is_none() {
             return Ok(());
         }

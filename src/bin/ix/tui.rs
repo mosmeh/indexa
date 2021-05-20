@@ -115,7 +115,7 @@ impl<'a> TuiApp<'a> {
             let _searcher = Searcher::run(database, query_rx, result_tx)?;
 
             self.query_tx = Some(query_tx);
-            self.on_query_change()?;
+            self.handle_query_change()?;
 
             loop {
                 let terminal_width = terminal.size()?.width;
@@ -133,7 +133,7 @@ impl<'a> TuiApp<'a> {
                     }
                     State::Accepted => {
                         cleanup_terminal(&mut terminal)?;
-                        self.on_accept()?;
+                        self.handle_accept()?;
                         break;
                     }
                     _ => (),
