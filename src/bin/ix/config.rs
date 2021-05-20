@@ -351,7 +351,10 @@ where
                     return Ok(Color::Rgb(r, g, b));
                 }
             }
-            Err(serde::de::Error::custom("Invalid color"))
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Str(&string),
+                &"Color name, RGB, or hex value",
+            ))
         }
     }
 }

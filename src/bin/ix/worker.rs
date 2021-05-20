@@ -3,10 +3,10 @@ use indexa::{
     query::Query,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use bincode::Options;
 use crossbeam_channel::{self, Receiver, Sender};
 use std::{
-    fs,
     path::Path,
     sync::{
         atomic::{self, AtomicBool},
@@ -28,6 +28,18 @@ impl Loader {
 
         Ok(Self)
     }
+}
+
+fn load_database<P>(db_path: P) -> Result<Database>
+where
+    P: AsRef<Path>,
+{
+    let database: Database = bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .reject_trailing_bytes()
+        .deserialize(&std::fs::read(db_path)?)
+        .context("Failed to load database. Try updating the database")?;
+    Ok(database)
 }
 
 pub struct Searcher {
@@ -125,11 +137,4 @@ impl Search {
     fn abort(&self) {
         self.aborted.store(true, atomic::Ordering::Relaxed);
     }
-}
-
-fn load_database<P>(db_path: P) -> Result<Database>
-where
-    P: AsRef<Path>,
-{
-    Ok(bincode::deserialize(&fs::read(db_path)?)?)
 }
