@@ -49,7 +49,7 @@ struct TuiApp<'a> {
     query_tx: Option<Sender<Query>>,
     text_box_state: TextBoxState,
     table_state: TableState,
-    page_shift_amount: u16,
+    page_scroll_amount: u16,
 }
 
 impl<'a> TuiApp<'a> {
@@ -65,7 +65,7 @@ impl<'a> TuiApp<'a> {
                 config.flags.query.clone().unwrap_or_else(|| "".to_string()),
             ),
             table_state: Default::default(),
-            page_shift_amount: 0,
+            page_scroll_amount: 0,
         };
 
         Ok(app)

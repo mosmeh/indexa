@@ -101,7 +101,7 @@ impl<'a> TuiApp<'a> {
             self.table_state.select(
                 self.table_state
                     .selected()
-                    .saturating_sub(self.page_shift_amount as usize),
+                    .saturating_sub(self.page_scroll_amount as usize),
             );
         }
 
@@ -111,7 +111,7 @@ impl<'a> TuiApp<'a> {
     fn on_pagedown(&mut self) -> Result<()> {
         if !self.hits.is_empty() {
             self.table_state.select(
-                (self.table_state.selected() + self.page_shift_amount as usize)
+                (self.table_state.selected() + self.page_scroll_amount as usize)
                     .min(self.hits.len() - 1),
             );
         }

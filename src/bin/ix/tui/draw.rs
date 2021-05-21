@@ -149,14 +149,17 @@ impl<'a> TuiApp<'a> {
         f.render_stateful_widget(table, area, &mut table_state);
         self.table_state = table_state;
 
-        self.page_shift_amount = area.height.saturating_sub(
-            // header
-            1 +
-            // header_gap
-            1 +
-            // one less than page height
-            1,
-        );
+        self.page_scroll_amount = area
+            .height
+            .saturating_sub(
+                // header
+                1 +
+                // header_gap
+                1 +
+                // one less than page height
+                1,
+            )
+            .max(1);
     }
 
     fn draw_status_bar(&self, f: &mut Frame<Backend>, area: Rect) {
