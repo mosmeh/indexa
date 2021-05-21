@@ -263,7 +263,8 @@ pub enum ModeFormatWindows {
     PowerShell,
 }
 
-const DEFAULT_CONFIG: &str = include_str!("../../../config/default.toml");
+const DEFAULT_CONFIG_STRING: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/config/default.toml"));
 
 pub fn read_or_create_config<P>(config_path: Option<P>) -> Result<Config>
 where
@@ -298,7 +299,7 @@ where
         }
 
         let mut writer = BufWriter::new(File::create(&path)?);
-        writer.write_all(DEFAULT_CONFIG.as_bytes())?;
+        writer.write_all(DEFAULT_CONFIG_STRING.as_bytes())?;
         writer.flush()?;
 
         eprintln!("Created a default configuration file at {}", path.display());
@@ -397,7 +398,7 @@ mod tests {
 
     #[test]
     fn default_config_is_consistent() {
-        let from_str: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
+        let from_str: Config = toml::from_str(DEFAULT_CONFIG_STRING).unwrap();
         let from_default_trait = Config::default();
 
         assert_eq!(from_str, from_default_trait);
