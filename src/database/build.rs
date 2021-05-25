@@ -88,6 +88,7 @@ impl DatabaseBuilder {
         let dirs = util::canonicalize_dirs(&self.dirs)?;
 
         let database = Database {
+            version: super::DATABASE_VERSION,
             name_arena: String::new(),
             entries: Vec::new(),
             root_paths: HashMap::with_capacity(dirs.len()),

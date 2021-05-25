@@ -7,12 +7,16 @@ pub use build::DatabaseBuilder;
 use crate::{mode::Mode, Result};
 
 use enum_map::{Enum, EnumMap};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::HashMap, path::PathBuf, time::SystemTime};
 use strum_macros::{Display, EnumIter};
 
+const DATABASE_VERSION: u32 = 1;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
+    #[serde(deserialize_with = "check_version_compatibility")]
+    version: u32,
     name_arena: String,
     entries: Vec<EntryNode>,
     root_paths: HashMap<u32, PathBuf>,
@@ -22,6 +26,22 @@ pub struct Database {
     modified: Option<Vec<SystemTime>>,
     accessed: Option<Vec<SystemTime>>,
     sorted_ids: EnumMap<StatusKind, Option<Vec<u32>>>,
+}
+
+fn check_version_compatibility<'de, D>(deserializer: D) -> std::result::Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let version = u32::deserialize(deserializer)?;
+
+    if version != DATABASE_VERSION {
+        return Err(serde::de::Error::custom(&concat!(
+            "Database is incompatible with this version of ",
+            env!("CARGO_PKG_NAME")
+        )));
+    }
+
+    Ok(version)
 }
 
 impl Database {
