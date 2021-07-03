@@ -70,7 +70,7 @@ impl Query {
     #[inline]
     pub fn match_detail<'a, 'b>(&'a self, entry: &'b Entry) -> Result<MatchDetail<'a, 'b>> {
         Ok(MatchDetail {
-            query: &self,
+            query: self,
             basename: entry.basename(),
             path_str: entry.path().to_str().ok_or(Error::NonUtf8Path)?.to_string(),
         })

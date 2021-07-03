@@ -353,7 +353,7 @@ where
                 }
             }
             Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Str(&string),
+                serde::de::Unexpected::Str(string),
                 &"Color name, RGB, or hex value",
             ))
         }

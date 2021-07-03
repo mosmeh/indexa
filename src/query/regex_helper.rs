@@ -54,7 +54,7 @@ fn hir_has_uppercase_char(hir: &Hir) -> bool {
             .iter()
             .any(|r| char::from(r.start()).is_uppercase() || char::from(r.end()).is_uppercase()),
         HirKind::Group(Group { hir, .. }) | HirKind::Repetition(Repetition { hir, .. }) => {
-            hir_has_uppercase_char(&hir)
+            hir_has_uppercase_char(hir)
         }
         HirKind::Concat(hirs) | HirKind::Alternation(hirs) => {
             hirs.iter().any(hir_has_uppercase_char)

@@ -26,7 +26,7 @@ where
 
     // we use str::starts_with, because Path::starts_with doesn't work well for Windows paths
     dirs.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
-    dirs.dedup_by(|(_, a), (_, b)| a.starts_with(&b as &str));
+    dirs.dedup_by(|(_, a), (_, b)| a.starts_with(b as &str));
 
     Ok(dirs.into_iter().map(|(path, _)| path).collect())
 }

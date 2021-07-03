@@ -354,9 +354,7 @@ where
         y += 1 + self.header_gap;
 
         let selected_symbol = self.selected_symbol.unwrap_or("");
-        let blank_symbol = iter::repeat(" ")
-            .take(selected_symbol.width())
-            .collect::<String>();
+        let blank_symbol = " ".repeat(selected_symbol.width());
 
         // Draw rows
         let default_style = Style::default();

@@ -191,7 +191,7 @@ impl<'a> TuiApp<'a> {
                         .split('\n')
                         .map(|s| s.trim())
                         .last()
-                        .unwrap_or(&"")
+                        .unwrap_or("")
                         .to_string(),
                 );
             }

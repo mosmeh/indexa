@@ -85,7 +85,7 @@ impl Database {
             vec![self.root_paths[&id].to_str().unwrap()]
         } else {
             let mut buf = self.path_vec_from_id(node.parent);
-            buf.push(&self.basename_from_node(node));
+            buf.push(self.basename_from_node(node));
             buf
         }
     }

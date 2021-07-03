@@ -43,7 +43,7 @@ impl Database {
 
             let regex = regex_tls.get_or(|| query.regex().clone());
             regex
-                .is_match(&self.basename_from_node(node))
+                .is_match(self.basename_from_node(node))
                 .then(|| Ok(EntryId(id)))
         })
     }
@@ -59,11 +59,11 @@ impl Database {
         if query.regex_enabled() {
             for (root_id, root_path) in &self.root_paths {
                 let root_node = &self.entries[*root_id as usize];
-                if query.regex().is_match(&root_path.to_str().unwrap()) {
+                if query.regex().is_match(root_path.to_str().unwrap()) {
                     hits[*root_id as usize].store(true, Ordering::Relaxed);
                 }
 
-                self.match_path_impl(root_node, &root_path, query, &regex_tls, &hits, aborted)?;
+                self.match_path_impl(root_node, root_path, query, &regex_tls, &hits, aborted)?;
             }
         } else {
             for ((root_id, root_path), next_root_id) in self.root_paths.iter().zip(
@@ -74,7 +74,7 @@ impl Database {
                     .chain(std::iter::once(self.entries.len() as u32)),
             ) {
                 let root_node = &self.entries[*root_id as usize];
-                if query.regex().is_match(&root_path.to_str().unwrap()) {
+                if query.regex().is_match(root_path.to_str().unwrap()) {
                     (*root_id..next_root_id)
                         .into_par_iter()
                         .try_for_each(|id| {
@@ -85,7 +85,7 @@ impl Database {
                             Ok(())
                         })?;
                 } else {
-                    self.match_path_impl(root_node, &root_path, query, &regex_tls, &hits, aborted)?;
+                    self.match_path_impl(root_node, root_path, query, &regex_tls, &hits, aborted)?;
                 }
             }
         }
