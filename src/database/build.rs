@@ -15,17 +15,15 @@ use std::{
 
 type StatusFlags = EnumMap<StatusKind, bool>;
 
-pub struct DatabaseBuilder {
-    dirs: Vec<PathBuf>,
+struct IndexOptions {
     index_flags: StatusFlags,
     fast_sort_flags: StatusFlags,
     ignore_hidden: bool,
 }
 
-impl Default for DatabaseBuilder {
+impl Default for IndexOptions {
     fn default() -> Self {
         Self {
-            dirs: Vec::new(),
             index_flags: enum_map! {
                 StatusKind::Basename => true,
                 StatusKind::FullPath => true,
@@ -51,6 +49,12 @@ impl Default for DatabaseBuilder {
     }
 }
 
+#[derive(Default)]
+pub struct DatabaseBuilder {
+    dirs: Vec<PathBuf>,
+    options: IndexOptions,
+}
+
 impl DatabaseBuilder {
     pub fn new() -> Self {
         Default::default()
@@ -62,23 +66,23 @@ impl DatabaseBuilder {
     }
 
     pub fn index(&mut self, kind: StatusKind) -> &mut Self {
-        self.index_flags[kind] = true;
+        self.options.index_flags[kind] = true;
         self
     }
 
     pub fn fast_sort(&mut self, kind: StatusKind) -> &mut Self {
-        self.fast_sort_flags[kind] = true;
+        self.options.fast_sort_flags[kind] = true;
         self
     }
 
     pub fn ignore_hidden(&mut self, yes: bool) -> &mut Self {
-        self.ignore_hidden = yes;
+        self.options.ignore_hidden = yes;
         self
     }
 
     pub fn build(&self) -> Result<Database> {
-        for (kind, enabled) in self.fast_sort_flags {
-            if enabled && !self.index_flags[kind] {
+        for (kind, enabled) in self.options.fast_sort_flags {
+            if enabled && !self.options.index_flags[kind] {
                 return Err(Error::InvalidOption(
                     "Fast sorting cannot be enabled for a non-indexed status.".to_string(),
                 ));
@@ -91,20 +95,18 @@ impl DatabaseBuilder {
             name_arena: String::new(),
             entries: Vec::new(),
             root_paths: HashMap::with_capacity(dirs.len()),
-            size: self.index_flags[StatusKind::Size].then(Vec::new),
-            mode: self.index_flags[StatusKind::Mode].then(Vec::new),
-            created: self.index_flags[StatusKind::Created].then(Vec::new),
-            modified: self.index_flags[StatusKind::Modified].then(Vec::new),
-            accessed: self.index_flags[StatusKind::Accessed].then(Vec::new),
+            size: self.options.index_flags[StatusKind::Size].then(Vec::new),
+            mode: self.options.index_flags[StatusKind::Mode].then(Vec::new),
+            created: self.options.index_flags[StatusKind::Created].then(Vec::new),
+            modified: self.options.index_flags[StatusKind::Modified].then(Vec::new),
+            accessed: self.options.index_flags[StatusKind::Accessed].then(Vec::new),
             sorted_ids: EnumMap::default(),
         };
 
         let database = Mutex::new(database);
 
         for path in dirs {
-            if let Ok(mut root_info) =
-                EntryInfo::from_path(&path, &self.index_flags, self.ignore_hidden)
-            {
+            if let Ok(mut root_info) = EntryInfo::from_path(&path, &self.options) {
                 if !root_info.ftype.is_dir() {
                     continue;
                 }
@@ -122,21 +124,14 @@ impl DatabaseBuilder {
                 };
 
                 if let Some(dir_entries) = dir_entries {
-                    walk_file_system(
-                        &database,
-                        &self.index_flags,
-                        self.ignore_hidden,
-                        dir_entries,
-                        root_node_id,
-                    );
+                    walk_file_system(&database, &self.options, dir_entries, root_node_id);
                 }
             }
         }
 
         let mut database = database.into_inner();
 
-        database.sorted_ids =
-            generate_sorted_ids(&database, &self.index_flags, &self.fast_sort_flags);
+        database.sorted_ids = generate_sorted_ids(&database, &self.options);
 
         Ok(database)
     }
@@ -180,6 +175,29 @@ impl Database {
     }
 }
 
+struct DirEntry {
+    name: String,
+    metadata: Metadata,
+    path: PathBuf,
+    ftype: FileType,
+}
+
+impl DirEntry {
+    fn from_std_dir_entry(dent: fs::DirEntry) -> Result<Self> {
+        let name = dent
+            .file_name()
+            .to_str()
+            .ok_or(Error::NonUtf8Path)?
+            .to_string();
+        Ok(Self {
+            name,
+            metadata: dent.metadata()?,
+            path: dent.path(),
+            ftype: dent.file_type()?,
+        })
+    }
+}
+
 struct EntryStatus {
     size: Option<u64>,
     mode: Option<Mode>,
@@ -189,29 +207,29 @@ struct EntryStatus {
 }
 
 impl EntryStatus {
-    fn from_metadata(metadata: &Metadata, index_flags: &StatusFlags) -> Result<Self> {
-        let size = index_flags[StatusKind::Size].then(|| metadata.len());
-        Self::from_metadata_with_size(size, metadata, index_flags)
+    fn from_metadata(metadata: &Metadata, options: &IndexOptions) -> Result<Self> {
+        let size = options.index_flags[StatusKind::Size].then(|| metadata.len());
+        Self::from_metadata_and_size(metadata, size, options)
     }
 
-    fn from_metadata_with_size(
-        size: Option<u64>,
+    fn from_metadata_and_size(
         metadata: &Metadata,
-        index_flags: &StatusFlags,
+        size: Option<u64>,
+        options: &IndexOptions,
     ) -> Result<Self> {
-        let mode = index_flags[StatusKind::Mode].then(|| metadata.into());
+        let mode = options.index_flags[StatusKind::Mode].then(|| metadata.into());
 
-        let created = if index_flags[StatusKind::Created] {
+        let created = if options.index_flags[StatusKind::Created] {
             Some(util::sanitize_system_time(&metadata.created()?))
         } else {
             None
         };
-        let modified = if index_flags[StatusKind::Modified] {
+        let modified = if options.index_flags[StatusKind::Modified] {
             Some(util::sanitize_system_time(&metadata.modified()?))
         } else {
             None
         };
-        let accessed = if index_flags[StatusKind::Accessed] {
+        let accessed = if options.index_flags[StatusKind::Accessed] {
             Some(util::sanitize_system_time(&metadata.accessed()?))
         } else {
             None
@@ -228,29 +246,6 @@ impl EntryStatus {
     }
 }
 
-struct DirEntry {
-    name: String,
-    metadata: Metadata,
-    path: PathBuf,
-    ftype: FileType,
-}
-
-impl DirEntry {
-    fn from_fs_dir_entry(dent: fs::DirEntry) -> Result<Self> {
-        let name = dent
-            .file_name()
-            .to_str()
-            .ok_or(Error::NonUtf8Path)?
-            .to_string();
-        Ok(Self {
-            name,
-            metadata: dent.metadata()?,
-            path: dent.path(),
-            ftype: dent.file_type()?,
-        })
-    }
-}
-
 struct EntryInfo {
     name: String,
     status: EntryStatus,
@@ -259,7 +254,7 @@ struct EntryInfo {
 }
 
 impl EntryInfo {
-    fn from_path(path: &Path, index_flags: &StatusFlags, ignore_hidden: bool) -> Result<Self> {
+    fn from_path(path: &Path, options: &IndexOptions) -> Result<Self> {
         let name = util::get_basename(path)
             .to_str()
             .ok_or(Error::NonUtf8Path)?
@@ -268,14 +263,14 @@ impl EntryInfo {
         let ftype = metadata.file_type();
 
         if ftype.is_dir() {
-            let (dir_entries, num_children) = get_dir_entries(path, ignore_hidden);
+            let (dir_entries, num_children) = get_dir_entries(path, options);
 
             Ok(Self {
                 name,
-                status: EntryStatus::from_metadata_with_size(
-                    Some(num_children),
+                status: EntryStatus::from_metadata_and_size(
                     &metadata,
-                    index_flags,
+                    Some(num_children),
+                    options,
                 )?,
                 dir_entries,
                 ftype,
@@ -283,28 +278,24 @@ impl EntryInfo {
         } else {
             Ok(Self {
                 name,
-                status: EntryStatus::from_metadata(&metadata, index_flags)?,
+                status: EntryStatus::from_metadata(&metadata, options)?,
                 dir_entries: None,
                 ftype,
             })
         }
     }
 
-    fn from_dir_entry(
-        dent: DirEntry,
-        index_flags: &StatusFlags,
-        ignore_hidden: bool,
-    ) -> Result<Self> {
+    fn from_dir_entry(dent: DirEntry, options: &IndexOptions) -> Result<Self> {
         if dent.ftype.is_dir() {
-            let (dir_entries, num_children) = get_dir_entries(&dent.path, ignore_hidden);
+            let (dir_entries, num_children) = get_dir_entries(&dent.path, options);
 
             Ok(Self {
                 name: dent.name,
                 ftype: dent.ftype,
-                status: EntryStatus::from_metadata_with_size(
-                    Some(num_children),
+                status: EntryStatus::from_metadata_and_size(
                     &dent.metadata,
-                    index_flags,
+                    Some(num_children),
+                    options,
                 )?,
                 dir_entries,
             })
@@ -312,26 +303,26 @@ impl EntryInfo {
             Ok(Self {
                 name: dent.name,
                 ftype: dent.ftype,
-                status: EntryStatus::from_metadata(&dent.metadata, index_flags)?,
+                status: EntryStatus::from_metadata(&dent.metadata, options)?,
                 dir_entries: None,
             })
         }
     }
 }
 
-fn get_dir_entries(path: &Path, ignore_hidden: bool) -> (Option<Vec<DirEntry>>, u64) {
+fn get_dir_entries(path: &Path, options: &IndexOptions) -> (Option<Vec<DirEntry>>, u64) {
     if let Ok(rd) = path.read_dir() {
-        let fs_dir_entries: Vec<_> = rd.collect();
-        let num_children = fs_dir_entries.len();
+        let std_dir_entries: Vec<_> = rd.collect();
+        let num_children = std_dir_entries.len();
 
-        let dir_entries = fs_dir_entries
+        let dir_entries = std_dir_entries
             .into_iter()
             .filter_map(|dent| {
                 dent.ok().and_then(|dent| {
-                    if ignore_hidden && is_hidden(&dent) {
+                    if options.ignore_hidden && is_hidden(&dent) {
                         return None;
                     }
-                    DirEntry::from_fs_dir_entry(dent).ok()
+                    DirEntry::from_std_dir_entry(dent).ok()
                 })
             })
             .collect();
@@ -344,14 +335,13 @@ fn get_dir_entries(path: &Path, ignore_hidden: bool) -> (Option<Vec<DirEntry>>, 
 
 fn walk_file_system(
     database: &Mutex<Database>,
-    index_flags: &StatusFlags,
-    ignore_hidden: bool,
+    options: &IndexOptions,
     dir_entries: Vec<DirEntry>,
     parent: u32,
 ) {
     let (mut child_dirs, child_files) = dir_entries
         .into_iter()
-        .filter_map(|dent| EntryInfo::from_dir_entry(dent, index_flags, ignore_hidden).ok())
+        .filter_map(|dent| EntryInfo::from_dir_entry(dent, options).ok())
         .partition::<Vec<_>, _>(|info| info.ftype.is_dir());
 
     if child_dirs.is_empty() && child_files.is_empty() {
@@ -393,18 +383,17 @@ fn walk_file_system(
             None
         })
         .for_each_with(database, |database, (index, dir_entries)| {
-            walk_file_system(database, index_flags, ignore_hidden, dir_entries, index);
+            walk_file_system(database, options, dir_entries, index);
         });
 }
 
 fn generate_sorted_ids(
     database: &Database,
-    index_flags: &StatusFlags,
-    fast_sort_flags: &StatusFlags,
+    options: &IndexOptions,
 ) -> EnumMap<StatusKind, Option<Vec<u32>>> {
     let mut sorted_ids = EnumMap::default();
     for (kind, key) in sorted_ids.iter_mut() {
-        if index_flags[kind] && fast_sort_flags[kind] {
+        if options.index_flags[kind] && options.fast_sort_flags[kind] {
             let compare_func = util::build_compare_func(kind);
 
             let mut indices = (0..database.entries.len() as u32).collect::<Vec<_>>();
