@@ -49,6 +49,18 @@ impl Default for IndexOptions {
     }
 }
 
+impl IndexOptions {
+    #[inline]
+    fn needs_metadata(&self) -> bool {
+        let flags = &self.index_flags;
+        flags[StatusKind::Size]
+            || flags[StatusKind::Mode]
+            || flags[StatusKind::Created]
+            || flags[StatusKind::Modified]
+            || flags[StatusKind::Accessed]
+    }
+}
+
 #[derive(Default)]
 pub struct DatabaseBuilder {
     dirs: Vec<PathBuf>,
@@ -150,20 +162,22 @@ impl Database {
         });
         self.name_arena.push_str(&info.name);
 
-        if let Some(size) = &mut self.size {
-            size.push(info.status.size.unwrap());
-        }
-        if let Some(mode) = &mut self.mode {
-            mode.push(info.status.mode.unwrap());
-        }
-        if let Some(created) = &mut self.created {
-            created.push(info.status.created.unwrap());
-        }
-        if let Some(modified) = &mut self.modified {
-            modified.push(info.status.modified.unwrap());
-        }
-        if let Some(accessed) = &mut self.accessed {
-            accessed.push(info.status.accessed.unwrap());
+        if let Some(status) = info.status {
+            if let Some(size) = &mut self.size {
+                size.push(status.size.unwrap());
+            }
+            if let Some(mode) = &mut self.mode {
+                mode.push(status.mode.unwrap());
+            }
+            if let Some(created) = &mut self.created {
+                created.push(status.created.unwrap());
+            }
+            if let Some(modified) = &mut self.modified {
+                modified.push(status.modified.unwrap());
+            }
+            if let Some(accessed) = &mut self.accessed {
+                accessed.push(status.accessed.unwrap());
+            }
         }
     }
 
@@ -177,23 +191,30 @@ impl Database {
 
 struct DirEntry {
     name: String,
-    metadata: Metadata,
     path: PathBuf,
     ftype: FileType,
+    metadata: Option<Metadata>,
 }
 
 impl DirEntry {
-    fn from_std_dir_entry(dent: fs::DirEntry) -> Result<Self> {
+    fn from_std_dir_entry(dent: fs::DirEntry, options: &IndexOptions) -> Result<Self> {
         let name = dent
             .file_name()
             .to_str()
             .ok_or(Error::NonUtf8Path)?
             .to_string();
+
+        let metadata = if options.needs_metadata() {
+            Some(dent.metadata()?)
+        } else {
+            None
+        };
+
         Ok(Self {
             name,
-            metadata: dent.metadata()?,
             path: dent.path(),
             ftype: dent.file_type()?,
+            metadata,
         })
     }
 }
@@ -248,9 +269,9 @@ impl EntryStatus {
 
 struct EntryInfo {
     name: String,
-    status: EntryStatus,
-    dir_entries: Option<Vec<DirEntry>>,
     ftype: FileType,
+    status: Option<EntryStatus>,
+    dir_entries: Option<Vec<DirEntry>>,
 }
 
 impl EntryInfo {
@@ -262,51 +283,67 @@ impl EntryInfo {
         let metadata = path.symlink_metadata()?;
         let ftype = metadata.file_type();
 
-        if ftype.is_dir() {
+        let (status, dir_entries) = if ftype.is_dir() {
             let (dir_entries, num_children) = get_dir_entries(path, options);
-
-            Ok(Self {
-                name,
-                status: EntryStatus::from_metadata_and_size(
+            let status = if options.needs_metadata() {
+                Some(EntryStatus::from_metadata_and_size(
                     &metadata,
                     Some(num_children),
                     options,
-                )?,
-                dir_entries,
-                ftype,
-            })
+                )?)
+            } else {
+                None
+            };
+
+            (status, dir_entries)
         } else {
-            Ok(Self {
-                name,
-                status: EntryStatus::from_metadata(&metadata, options)?,
-                dir_entries: None,
-                ftype,
-            })
-        }
+            let status = if options.needs_metadata() {
+                Some(EntryStatus::from_metadata(&metadata, options)?)
+            } else {
+                None
+            };
+
+            (status, None)
+        };
+
+        Ok(Self {
+            name,
+            ftype,
+            status,
+            dir_entries,
+        })
     }
 
     fn from_dir_entry(dent: DirEntry, options: &IndexOptions) -> Result<Self> {
-        if dent.ftype.is_dir() {
+        let (status, dir_entries) = if dent.ftype.is_dir() {
             let (dir_entries, num_children) = get_dir_entries(&dent.path, options);
-
-            Ok(Self {
-                name: dent.name,
-                ftype: dent.ftype,
-                status: EntryStatus::from_metadata_and_size(
-                    &dent.metadata,
+            let status = if let Some(metadata) = dent.metadata {
+                Some(EntryStatus::from_metadata_and_size(
+                    &metadata,
                     Some(num_children),
                     options,
-                )?,
-                dir_entries,
-            })
+                )?)
+            } else {
+                None
+            };
+
+            (status, dir_entries)
         } else {
-            Ok(Self {
-                name: dent.name,
-                ftype: dent.ftype,
-                status: EntryStatus::from_metadata(&dent.metadata, options)?,
-                dir_entries: None,
-            })
-        }
+            let status = if let Some(metadata) = dent.metadata {
+                Some(EntryStatus::from_metadata(&metadata, options)?)
+            } else {
+                None
+            };
+
+            (status, None)
+        };
+
+        Ok(Self {
+            name: dent.name,
+            ftype: dent.ftype,
+            status,
+            dir_entries,
+        })
     }
 }
 
@@ -322,7 +359,7 @@ fn get_dir_entries(path: &Path, options: &IndexOptions) -> (Option<Vec<DirEntry>
                     if options.ignore_hidden && is_hidden(&dent) {
                         return None;
                     }
-                    DirEntry::from_std_dir_entry(dent).ok()
+                    DirEntry::from_std_dir_entry(dent, options).ok()
                 })
             })
             .collect();
