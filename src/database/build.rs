@@ -123,7 +123,7 @@ impl DatabaseBuilder {
                     continue;
                 }
 
-                let dir_entries = mem::replace(&mut root_info.dir_entries, None);
+                let dir_entries = mem::take(&mut root_info.dir_entries);
 
                 let root_node_id = {
                     let mut db = database.lock();
@@ -135,8 +135,8 @@ impl DatabaseBuilder {
                     root_node_id
                 };
 
-                if let Some(dir_entries) = dir_entries {
-                    walk_file_system(&database, &self.options, dir_entries, root_node_id);
+                if !dir_entries.is_empty() {
+                    walk_file_system(&database, &self.options, root_node_id, dir_entries);
                 }
             }
         }
@@ -151,11 +151,11 @@ impl DatabaseBuilder {
 
 impl Database {
     #[inline]
-    fn push_entry(&mut self, info: EntryInfo, parent: u32) {
+    fn push_entry(&mut self, info: EntryInfo, parent_id: u32) {
         self.entries.push(EntryNode {
             name_start: self.name_arena.len(),
             name_len: info.name.len() as u16,
-            parent,
+            parent: parent_id,
             child_start: u32::MAX,
             child_end: u32::MAX,
             is_dir: info.ftype.is_dir(),
@@ -189,6 +189,11 @@ impl Database {
     }
 }
 
+/// Our version of DirEntry.
+// std::fs::DirEntry keeps a file descriptor open, which leads to
+// "too many open files" error when we are holding lots of std::fs::DirEntry.
+// We avoid the problem by extracting information into our DirEntry and
+// discarding std::fs::DirEntry.
 struct DirEntry {
     name: String,
     path: PathBuf,
@@ -219,6 +224,7 @@ impl DirEntry {
     }
 }
 
+/// Our representation of metadata.
 struct EntryStatus {
     size: Option<u64>,
     mode: Option<Mode>,
@@ -267,11 +273,12 @@ impl EntryStatus {
     }
 }
 
+/// Struct holding information needed to create single entry and iterate over its children.
 struct EntryInfo {
     name: String,
     ftype: FileType,
     status: Option<EntryStatus>,
-    dir_entries: Option<Vec<DirEntry>>,
+    dir_entries: Vec<DirEntry>,
 }
 
 impl EntryInfo {
@@ -284,7 +291,7 @@ impl EntryInfo {
         let ftype = metadata.file_type();
 
         let (status, dir_entries) = if ftype.is_dir() {
-            let (dir_entries, num_children) = get_dir_entries(path, options);
+            let (dir_entries, num_children) = list_dir(path, options).unwrap_or_default();
             let status = if options.needs_metadata() {
                 Some(EntryStatus::from_metadata_and_size(
                     &metadata,
@@ -303,7 +310,7 @@ impl EntryInfo {
                 None
             };
 
-            (status, None)
+            (status, Vec::new())
         };
 
         Ok(Self {
@@ -316,7 +323,7 @@ impl EntryInfo {
 
     fn from_dir_entry(dent: DirEntry, options: &IndexOptions) -> Result<Self> {
         let (status, dir_entries) = if dent.ftype.is_dir() {
-            let (dir_entries, num_children) = get_dir_entries(&dent.path, options);
+            let (dir_entries, num_children) = list_dir(&dent.path, options).unwrap_or_default();
             let status = if let Some(metadata) = dent.metadata {
                 Some(EntryStatus::from_metadata_and_size(
                     &metadata,
@@ -335,7 +342,7 @@ impl EntryInfo {
                 None
             };
 
-            (status, None)
+            (status, Vec::new())
         };
 
         Ok(Self {
@@ -347,34 +354,33 @@ impl EntryInfo {
     }
 }
 
-fn get_dir_entries(path: &Path, options: &IndexOptions) -> (Option<Vec<DirEntry>>, u64) {
-    if let Ok(rd) = path.read_dir() {
-        let std_dir_entries: Vec<_> = rd.collect();
-        let num_children = std_dir_entries.len();
+fn list_dir(path: &Path, options: &IndexOptions) -> Result<(Vec<DirEntry>, u64)> {
+    let rd = path.read_dir()?;
 
-        let dir_entries = std_dir_entries
-            .into_iter()
-            .filter_map(|dent| {
-                dent.ok().and_then(|dent| {
-                    if options.ignore_hidden && is_hidden(&dent) {
-                        return None;
-                    }
-                    DirEntry::from_std_dir_entry(dent, options).ok()
-                })
-            })
-            .collect();
+    let mut dir_entries = Vec::new();
+    let mut num_children = 0;
 
-        (Some(dir_entries), num_children as u64)
-    } else {
-        (None, 0)
+    for dent in rd {
+        num_children += 1;
+
+        if let Ok(dent) = dent {
+            if options.ignore_hidden && is_hidden(&dent) {
+                continue;
+            }
+            if let Ok(dir_entry) = DirEntry::from_std_dir_entry(dent, options) {
+                dir_entries.push(dir_entry);
+            }
+        }
     }
+
+    Ok((dir_entries, num_children))
 }
 
 fn walk_file_system(
     database: &Mutex<Database>,
     options: &IndexOptions,
+    parent_id: u32,
     dir_entries: Vec<DirEntry>,
-    parent: u32,
 ) {
     let (mut child_dirs, child_files) = dir_entries
         .into_iter()
@@ -387,7 +393,7 @@ fn walk_file_system(
 
     let child_dir_entries: Vec<_> = child_dirs
         .iter_mut()
-        .map(|info| mem::replace(&mut info.dir_entries, None))
+        .map(|info| mem::take(&mut info.dir_entries))
         .collect();
 
     let (dir_start, dir_end) = {
@@ -397,12 +403,12 @@ fn walk_file_system(
         let dir_end = child_start + child_dirs.len() as u32;
         let child_end = dir_end + child_files.len() as u32;
 
-        db.set_children_range(parent, child_start..child_end);
+        db.set_children_range(parent_id, child_start..child_end);
         for info in child_dirs {
-            db.push_entry(info, parent);
+            db.push_entry(info, parent_id);
         }
         for info in child_files {
-            db.push_entry(info, parent);
+            db.push_entry(info, parent_id);
         }
 
         (child_start, dir_end)
@@ -411,17 +417,8 @@ fn walk_file_system(
     (dir_start..dir_end)
         .into_par_iter()
         .zip(child_dir_entries.into_par_iter())
-        .filter_map(|(index, dir_entries)| {
-            if let Some(dir_entries) = dir_entries {
-                if !dir_entries.is_empty() {
-                    return Some((index, dir_entries));
-                }
-            }
-            None
-        })
-        .for_each_with(database, |database, (index, dir_entries)| {
-            walk_file_system(database, options, dir_entries, index);
-        });
+        .filter(|(_, dir_entries)| !dir_entries.is_empty())
+        .for_each(|(id, dir_entries)| walk_file_system(database, options, id, dir_entries));
 }
 
 fn generate_sorted_ids(
