@@ -102,10 +102,18 @@ pub enum StatusKind {
     #[serde(alias = "ext")]
     Extension,
     Size,
-    #[serde(alias = "attribute", alias = "attributes", alias = "attr")]
+    #[serde(
+        alias = "attribute",
+        alias = "attributes",
+        alias = "attr",
+        alias = "attrs"
+    )]
     Mode,
+    #[serde(alias = "ctime")]
     Created,
+    #[serde(alias = "mtime")]
     Modified,
+    #[serde(alias = "atime")]
     Accessed,
 }
 
