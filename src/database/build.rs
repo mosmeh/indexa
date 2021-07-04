@@ -516,18 +516,23 @@ mod tests {
         let path2 = tmpdir2.path();
 
         let mut builder = DatabaseBuilder::new();
+
+        let database1 = builder.add_dir(path).add_dir(path2).build().unwrap();
+        let mut paths1 = collect_paths(database1.root_entries());
+        paths1.sort_unstable();
+
         for kind in StatusKind::iter() {
             builder.index(kind);
             builder.fast_sort(kind);
         }
 
-        let database = builder.add_dir(path).add_dir(path2).build().unwrap();
+        let database2 = builder.add_dir(path).add_dir(path2).build().unwrap();
+        let mut paths2 = collect_paths(database2.root_entries());
+        paths2.sort_unstable();
 
-        let mut paths = collect_paths(database.root_entries());
-        paths.sort_unstable();
-
+        assert_eq!(paths1, paths2);
         assert_eq!(
-            paths,
+            paths1,
             vec![
                 path.to_path_buf(),
                 path.join("a"),
