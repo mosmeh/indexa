@@ -40,7 +40,7 @@ impl Database {
     #[inline]
     pub fn is_indexed(&self, kind: StatusKind) -> bool {
         match kind {
-            StatusKind::Basename | StatusKind::FullPath | StatusKind::Extension => true,
+            StatusKind::Basename | StatusKind::Path | StatusKind::Extension => true,
             StatusKind::Size => self.size.is_some(),
             StatusKind::Mode => self.mode.is_some(),
             StatusKind::Created => self.created.is_some(),
@@ -96,9 +96,7 @@ impl Database {
 pub enum StatusKind {
     #[serde(alias = "name")]
     Basename,
-    #[serde(rename = "path")]
-    #[strum(serialize = "Path")]
-    FullPath,
+    Path,
     #[serde(alias = "ext")]
     Extension,
     Size,

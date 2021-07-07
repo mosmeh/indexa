@@ -40,7 +40,7 @@ pub fn build_compare_func(
 ) -> Box<dyn Fn(&Entry, &Entry) -> Ordering + Send + Sync> {
     match kind {
         StatusKind::Basename => Box::new(|a, b| a.basename().cmp(b.basename())),
-        StatusKind::FullPath => Box::new(|a, b| a.path_vec().cmp(&b.path_vec())),
+        StatusKind::Path => Box::new(|a, b| a.path_vec().cmp(&b.path_vec())),
         StatusKind::Extension => Box::new(|a, b| {
             a.extension()
                 .cmp(&b.extension())

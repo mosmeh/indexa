@@ -26,7 +26,7 @@ impl Default for IndexOptions {
         Self {
             index_flags: enum_map! {
                 StatusKind::Basename => true,
-                StatusKind::FullPath => true,
+                StatusKind::Path => true,
                 StatusKind::Extension => true,
                 StatusKind::Size => false,
                 StatusKind::Mode => false,
@@ -36,7 +36,7 @@ impl Default for IndexOptions {
             },
             fast_sort_flags: enum_map! {
                 StatusKind::Basename => true,
-                StatusKind::FullPath => false,
+                StatusKind::Path => false,
                 StatusKind::Extension => false,
                 StatusKind::Size => false,
                 StatusKind::Mode => false,

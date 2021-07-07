@@ -211,7 +211,7 @@ impl<'a> TuiApp<'a> {
                 entry.basename().to_string(),
                 match_detail.basename_matches().into_iter(),
             ),
-            StatusKind::FullPath => HighlightableText::Highlighted(
+            StatusKind::Path => HighlightableText::Highlighted(
                 match_detail.path_str().to_string(),
                 match_detail.path_matches().into_iter(),
             ),

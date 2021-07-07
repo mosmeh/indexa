@@ -171,7 +171,7 @@ impl Default for UIConfig {
                     width: Some(16),
                 },
                 Column {
-                    status: StatusKind::FullPath,
+                    status: StatusKind::Path,
                     width: None,
                 },
             ],
