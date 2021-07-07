@@ -11,8 +11,12 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, time::SystemTime};
 use strum_macros::{Display, EnumIter};
 
+// Database can have multiple "root" entries, which correspond to directories
+// specified in "dirs" in config.
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
+    /// names of all entries concatenated
     name_arena: String,
     entries: Vec<EntryNode>,
     root_paths: HashMap<u32, PathBuf>,
@@ -118,6 +122,10 @@ pub enum StatusKind {
 #[derive(Debug, Copy, Clone)]
 pub struct EntryId(u32);
 
+/// A convenience struct which acts as if it holds data of the entry.
+///
+/// If a requested status is indexed, Entry grabs it from database.
+/// Otherwise the status is fetched from file systems.
 pub struct Entry<'a> {
     database: &'a Database,
     id: EntryId,
