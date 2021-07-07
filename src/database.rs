@@ -147,17 +147,15 @@ impl<'a> Entry<'a> {
 
     #[inline]
     pub fn extension(&self) -> Option<&str> {
-        let node = &self.node();
+        let node = self.node();
         if node.is_dir {
             return None;
         }
 
-        let name = self.database.basename_from_node(node);
-        if name.contains('.') {
-            name.split('.').last()
-        } else {
-            None
-        }
+        self.database
+            .basename_from_node(node)
+            .rsplit_once('.')
+            .map(|(_, ext)| ext)
     }
 
     #[inline]

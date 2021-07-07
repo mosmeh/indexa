@@ -185,14 +185,15 @@ impl<'a> TuiApp<'a> {
                 self.query_tx.as_ref().unwrap().send(query)?;
             }
             Err(err) => {
+                let err_str = err.to_string();
+                let err_str = err_str.trim();
+
                 // HACK: extract last line to fit in status bar
                 self.status = State::InvalidQuery(
-                    err.to_string()
-                        .split('\n')
-                        .map(|s| s.trim())
-                        .last()
-                        .unwrap_or("")
-                        .to_string(),
+                    err_str
+                        .rsplit_once('\n')
+                        .map(|(_, s)| s.trim().to_string())
+                        .unwrap_or_else(|| err_str.to_string()),
                 );
             }
         }
