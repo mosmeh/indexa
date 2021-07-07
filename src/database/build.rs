@@ -426,18 +426,16 @@ fn generate_sorted_ids(
     options: &IndexOptions,
 ) -> EnumMap<StatusKind, Option<Vec<u32>>> {
     let mut sorted_ids = EnumMap::default();
-    for (kind, key) in sorted_ids.iter_mut() {
+    for (kind, value) in sorted_ids.iter_mut() {
         if options.index_flags[kind] && options.fast_sort_flags[kind] {
-            let compare_func = util::build_compare_func(kind);
+            let compare_func = util::get_compare_func(kind);
 
-            let mut indices = (0..database.entries.len() as u32).collect::<Vec<_>>();
-            indices
-                .as_parallel_slice_mut()
-                .par_sort_unstable_by(|a, b| {
-                    compare_func(&database.entry(EntryId(*a)), &database.entry(EntryId(*b)))
-                });
+            let mut ids = (0..database.entries.len() as u32).collect::<Vec<_>>();
+            ids.as_parallel_slice_mut().par_sort_unstable_by(|a, b| {
+                compare_func(&database.entry(EntryId(*a)), &database.entry(EntryId(*b)))
+            });
 
-            *key = Some(indices);
+            *value = Some(ids);
         }
     }
     sorted_ids

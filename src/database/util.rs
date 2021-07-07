@@ -35,47 +35,42 @@ pub fn get_basename(path: &Path) -> &std::ffi::OsStr {
     path.file_name().unwrap_or_else(|| path.as_os_str())
 }
 
-pub fn build_compare_func(
-    kind: StatusKind,
-) -> Box<dyn Fn(&Entry, &Entry) -> Ordering + Send + Sync> {
+pub fn get_compare_func(kind: StatusKind) -> fn(&Entry, &Entry) -> Ordering {
+    #[inline]
+    fn cmp_by_basename(a: &Entry, b: &Entry) -> Ordering {
+        Ord::cmp(a.basename(), b.basename())
+    }
+    fn cmp_by_path(a: &Entry, b: &Entry) -> Ordering {
+        Ord::cmp(&a.path_vec(), &b.path_vec())
+    }
+    fn cmp_by_extension(a: &Entry, b: &Entry) -> Ordering {
+        Ord::cmp(&a.extension(), &b.extension())
+    }
+    fn cmp_by_size(a: &Entry, b: &Entry) -> Ordering {
+        Ord::cmp(&a.size().ok(), &b.size().ok()).then_with(|| cmp_by_basename(a, b))
+    }
+    fn cmp_by_mode(a: &Entry, b: &Entry) -> Ordering {
+        Ord::cmp(&a.mode().ok(), &b.mode().ok()).then_with(|| cmp_by_basename(a, b))
+    }
+    fn cmp_by_created(a: &Entry, b: &Entry) -> Ordering {
+        Ord::cmp(&a.created().ok(), &b.created().ok()).then_with(|| cmp_by_basename(a, b))
+    }
+    fn cmp_by_modified(a: &Entry, b: &Entry) -> Ordering {
+        Ord::cmp(&a.modified().ok(), &b.modified().ok()).then_with(|| cmp_by_basename(a, b))
+    }
+    fn cmp_by_accessed(a: &Entry, b: &Entry) -> Ordering {
+        Ord::cmp(&a.accessed().ok(), &b.accessed().ok()).then_with(|| cmp_by_basename(a, b))
+    }
+
     match kind {
-        StatusKind::Basename => Box::new(|a, b| a.basename().cmp(b.basename())),
-        StatusKind::Path => Box::new(|a, b| a.path_vec().cmp(&b.path_vec())),
-        StatusKind::Extension => Box::new(|a, b| {
-            a.extension()
-                .cmp(&b.extension())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Size => Box::new(|a, b| {
-            a.size()
-                .ok()
-                .cmp(&b.size().ok())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Mode => Box::new(|a, b| {
-            a.mode()
-                .ok()
-                .cmp(&b.mode().ok())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Created => Box::new(|a, b| {
-            a.created()
-                .ok()
-                .cmp(&b.created().ok())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Modified => Box::new(|a, b| {
-            a.modified()
-                .ok()
-                .cmp(&b.modified().ok())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
-        StatusKind::Accessed => Box::new(|a, b| {
-            a.accessed()
-                .ok()
-                .cmp(&b.accessed().ok())
-                .then_with(|| a.basename().cmp(b.basename()))
-        }),
+        StatusKind::Basename => cmp_by_basename,
+        StatusKind::Path => cmp_by_path,
+        StatusKind::Extension => cmp_by_extension,
+        StatusKind::Size => cmp_by_size,
+        StatusKind::Mode => cmp_by_mode,
+        StatusKind::Created => cmp_by_created,
+        StatusKind::Modified => cmp_by_modified,
+        StatusKind::Accessed => cmp_by_accessed,
     }
 }
 

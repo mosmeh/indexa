@@ -180,10 +180,10 @@ impl Database {
     where
         F: Fn((u32, &EntryNode)) -> Option<Result<EntryId>> + Send + Sync,
     {
-        let hits: Result<Vec<_>> = if self.is_fast_sortable(query.sort_by()) {
-            let iter = self.sorted_ids[query.sort_by()]
-                .as_ref()
-                .unwrap()
+        let hits: Result<Vec<_>> = if let Some(sorted_ids) =
+            self.sorted_ids[query.sort_by()].as_ref()
+        {
+            let iter = sorted_ids
                 .par_iter()
                 .map(|id| (*id, &self.entries[*id as usize]));
             match query.sort_order() {
@@ -197,7 +197,7 @@ impl Database {
                 .filter_map(func)
                 .collect::<Result<Vec<_>>>()?;
 
-            let compare_func = util::build_compare_func(query.sort_by());
+            let compare_func = util::get_compare_func(query.sort_by());
             match query.sort_order() {
                 SortOrder::Ascending => v
                     .as_parallel_slice_mut()
