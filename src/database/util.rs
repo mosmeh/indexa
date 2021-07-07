@@ -41,10 +41,10 @@ pub fn get_compare_func(kind: StatusKind) -> fn(&Entry, &Entry) -> Ordering {
         Ord::cmp(a.basename(), b.basename())
     }
     fn cmp_by_path(a: &Entry, b: &Entry) -> Ordering {
-        Ord::cmp(&a.path_vec(), &b.path_vec())
+        Entry::cmp_by_path(a, b)
     }
     fn cmp_by_extension(a: &Entry, b: &Entry) -> Ordering {
-        Ord::cmp(&a.extension(), &b.extension())
+        Entry::cmp_by_extension(a, b)
     }
     fn cmp_by_size(a: &Entry, b: &Entry) -> Ordering {
         Ord::cmp(&a.size().ok(), &b.size().ok()).then_with(|| cmp_by_basename(a, b))

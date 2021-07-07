@@ -8,7 +8,7 @@ use crate::{mode::Mode, Result};
 
 use enum_map::{Enum, EnumMap};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf, time::SystemTime};
+use std::{cmp::Ordering, collections::HashMap, path::PathBuf, time::SystemTime};
 use strum_macros::{Display, EnumIter};
 
 // Database can have multiple "root" entries, which correspond to directories
@@ -81,17 +81,59 @@ impl Database {
         }
     }
 
-    #[inline]
-    fn path_vec_from_id(&self, id: u32) -> Vec<&str> {
-        let node = &self.entries[id as usize];
-        if node.parent == id {
-            // root node
-            vec![self.root_paths[&id].to_str().unwrap()]
-        } else {
-            let mut buf = self.path_vec_from_id(node.parent);
-            buf.push(self.basename_from_node(node));
-            buf
+    fn cmp_by_path(&self, id_a: u32, id_b: u32) -> Ordering {
+        // -- Fast path --
+
+        if id_a == id_b {
+            return Ordering::Equal;
         }
+
+        let node_a = &self.entries[id_a as usize];
+        let node_b = &self.entries[id_b as usize];
+
+        let a_is_root = node_a.parent == id_a;
+        let b_is_root = node_b.parent == id_b;
+
+        if a_is_root && b_is_root {
+            // e.g. C:\ vs. D:\
+            return Ord::cmp(&self.root_paths[&id_a], &self.root_paths[&id_b]);
+        }
+
+        if !a_is_root && !b_is_root && node_a.parent == node_b.parent {
+            // e.g. /foo/bar vs. /foo/baz
+            return Ord::cmp(
+                self.basename_from_node(node_a),
+                self.basename_from_node(node_b),
+            );
+        }
+
+        if !b_is_root && id_a == node_b.parent {
+            // e.g. /foo vs. /foo/bar
+            return Ordering::Less;
+        }
+        if !a_is_root && id_b == node_a.parent {
+            // e.g. /foo/bar vs. /foo
+            return Ordering::Greater;
+        }
+
+        // -- Slow path --
+
+        // "path" in the sense of graph
+        fn path_from_root(db: &Database, mut id: u32) -> impl Iterator<Item = &str> {
+            let mut path = Vec::new();
+            loop {
+                let node = &db.entries[id as usize];
+                path.push(db.basename_from_node(node));
+                if node.parent == id {
+                    // root node
+                    return path.into_iter().rev();
+                } else {
+                    id = node.parent;
+                }
+            }
+        }
+
+        Iterator::cmp(path_from_root(self, id_a), path_from_root(self, id_b))
     }
 }
 
@@ -235,13 +277,21 @@ impl<'a> Entry<'a> {
     }
 
     #[inline]
-    fn path_vec(&'a self) -> Vec<&'a str> {
-        self.database.path_vec_from_id(self.id.0)
+    fn node(&self) -> &EntryNode {
+        &self.database.entries[self.id.0 as usize]
     }
 
     #[inline]
-    fn node(&self) -> &EntryNode {
-        &self.database.entries[self.id.0 as usize]
+    fn cmp_by_path(&self, other: &Self) -> Ordering {
+        self.database.cmp_by_path(self.id.0, other.id.0)
+    }
+
+    #[inline]
+    fn cmp_by_extension(&self, other: &Self) -> Ordering {
+        if self.node().is_dir && other.node().is_dir {
+            return Ordering::Equal;
+        }
+        self.extension().cmp(&other.extension())
     }
 }
 
