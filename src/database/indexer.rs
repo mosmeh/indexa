@@ -71,24 +71,20 @@ impl<'a> Indexer<'a> {
     }
 
     pub fn index<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
-        if let Ok(mut root_info) = EntryInfo::from_path(path.as_ref(), self.options) {
-            if !root_info.ftype.is_dir() {
-                return Ok(self);
-            }
+        let mut root_info = EntryInfo::from_path(path.as_ref(), self.options)?;
 
-            let dir_entries = mem::take(&mut root_info.dir_entries);
+        let dir_entries = mem::take(&mut root_info.dir_entries);
 
-            let root_node_id = self.database.nodes.len() as u32;
-            self.database.push_entry(root_info, root_node_id);
-            self.database
-                .root_paths
-                .insert(root_node_id, path.as_ref().to_path_buf());
+        let root_node_id = self.database.nodes.len() as u32;
+        self.database.push_entry(root_info, root_node_id);
+        self.database
+            .root_paths
+            .insert(root_node_id, path.as_ref().to_path_buf());
 
-            if !dir_entries.is_empty() {
-                let database = Mutex::new(self.database);
-                walk_file_system(&database, self.options, root_node_id, dir_entries);
-                self.database = database.into_inner();
-            }
+        if !dir_entries.is_empty() {
+            let database = Mutex::new(self.database);
+            walk_file_system(&database, self.options, root_node_id, dir_entries);
+            self.database = database.into_inner();
         }
 
         Ok(self)
