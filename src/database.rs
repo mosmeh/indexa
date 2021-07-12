@@ -18,7 +18,7 @@ use strum_macros::{Display, EnumIter};
 pub struct Database {
     /// names of all entries concatenated
     name_arena: String,
-    entries: Vec<EntryNode>,
+    nodes: Vec<EntryNode>,
     root_paths: HashMap<u32, PathBuf>,
     size: Option<Vec<u64>>,
     mode: Option<Vec<Mode>>,
@@ -31,7 +31,7 @@ pub struct Database {
 impl Database {
     #[inline]
     pub fn num_entries(&self) -> usize {
-        self.entries.len()
+        self.nodes.len()
     }
 
     #[inline]
@@ -70,7 +70,7 @@ impl Database {
 
     #[inline]
     fn path_from_id(&self, id: u32) -> PathBuf {
-        let node = &self.entries[id as usize];
+        let node = &self.nodes[id as usize];
         if node.parent == id {
             // root node
             self.root_paths[&id].clone()
@@ -88,8 +88,8 @@ impl Database {
             return Ordering::Equal;
         }
 
-        let node_a = &self.entries[id_a as usize];
-        let node_b = &self.entries[id_b as usize];
+        let node_a = &self.nodes[id_a as usize];
+        let node_b = &self.nodes[id_b as usize];
 
         let a_is_root = node_a.parent == id_a;
         let b_is_root = node_b.parent == id_b;
@@ -122,7 +122,7 @@ impl Database {
         fn path_from_root(db: &Database, mut id: u32) -> impl Iterator<Item = &str> {
             let mut path = Vec::new();
             loop {
-                let node = &db.entries[id as usize];
+                let node = &db.nodes[id as usize];
                 path.push(db.basename_from_node(node));
                 if node.parent == id {
                     // root node
@@ -278,7 +278,7 @@ impl<'a> Entry<'a> {
 
     #[inline]
     fn node(&self) -> &EntryNode {
-        &self.database.entries[self.id.0 as usize]
+        &self.database.nodes[self.id.0 as usize]
     }
 
     #[inline]

@@ -105,7 +105,7 @@ impl DatabaseBuilder {
 
         let database = Database {
             name_arena: String::new(),
-            entries: Vec::new(),
+            nodes: Vec::new(),
             root_paths: HashMap::with_capacity(dirs.len()),
             size: self.options.index_flags[StatusKind::Size].then(Vec::new),
             mode: self.options.index_flags[StatusKind::Mode].then(Vec::new),
@@ -128,7 +128,7 @@ impl DatabaseBuilder {
                 let root_node_id = {
                     let mut db = database.lock();
 
-                    let root_node_id = db.entries.len() as u32;
+                    let root_node_id = db.nodes.len() as u32;
                     db.push_entry(root_info, root_node_id);
                     db.root_paths.insert(root_node_id, path);
 
@@ -152,7 +152,7 @@ impl DatabaseBuilder {
 impl Database {
     #[inline]
     fn push_entry(&mut self, info: EntryInfo, parent_id: u32) {
-        self.entries.push(EntryNode {
+        self.nodes.push(EntryNode {
             name_start: self.name_arena.len(),
             name_len: info.name.len() as u16,
             parent: parent_id,
@@ -183,9 +183,9 @@ impl Database {
 
     #[inline]
     fn set_children_range(&mut self, id: u32, range: Range<u32>) {
-        let mut entry = &mut self.entries[id as usize];
-        entry.child_start = range.start;
-        entry.child_end = range.end;
+        let mut node = &mut self.nodes[id as usize];
+        node.child_start = range.start;
+        node.child_end = range.end;
     }
 }
 
@@ -399,7 +399,7 @@ fn walk_file_system(
     let (dir_start, dir_end) = {
         let mut db = database.lock();
 
-        let child_start = db.entries.len() as u32;
+        let child_start = db.nodes.len() as u32;
         let dir_end = child_start + child_dirs.len() as u32;
         let child_end = dir_end + child_files.len() as u32;
 
@@ -430,7 +430,7 @@ fn generate_sorted_ids(
         if options.index_flags[kind] && options.fast_sort_flags[kind] {
             let compare_func = util::get_compare_func(kind);
 
-            let mut ids = (0..database.entries.len() as u32).collect::<Vec<_>>();
+            let mut ids = (0..database.nodes.len() as u32).collect::<Vec<_>>();
             ids.as_parallel_slice_mut().par_sort_unstable_by(|a, b| {
                 compare_func(&database.entry(EntryId(*a)), &database.entry(EntryId(*b)))
             });

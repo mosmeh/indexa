@@ -49,8 +49,8 @@ impl Database {
     }
 
     fn match_path(&self, query: &Query, aborted: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
-        let mut hits = Vec::with_capacity(self.entries.len());
-        for _ in 0..self.entries.len() {
+        let mut hits = Vec::with_capacity(self.nodes.len());
+        for _ in 0..self.nodes.len() {
             hits.push(AtomicBool::new(false));
         }
 
@@ -58,7 +58,7 @@ impl Database {
 
         if query.regex_enabled() {
             for (root_id, root_path) in &self.root_paths {
-                let root_node = &self.entries[*root_id as usize];
+                let root_node = &self.nodes[*root_id as usize];
                 if query.regex().is_match(root_path.to_str().unwrap()) {
                     hits[*root_id as usize].store(true, Ordering::Relaxed);
                 }
@@ -71,9 +71,9 @@ impl Database {
                     .keys()
                     .skip(1)
                     .copied()
-                    .chain(std::iter::once(self.entries.len() as u32)),
+                    .chain(std::iter::once(self.nodes.len() as u32)),
             ) {
-                let root_node = &self.entries[*root_id as usize];
+                let root_node = &self.nodes[*root_id as usize];
                 if query.regex().is_match(root_path.to_str().unwrap()) {
                     (*root_id..next_root_id)
                         .into_par_iter()
@@ -119,7 +119,7 @@ impl Database {
                     return Err(Error::SearchAbort);
                 }
 
-                let child = &self.entries[id as usize];
+                let child = &self.nodes[id as usize];
                 let child_path = path.join(&self.basename_from_node(child));
                 if let Some(s) = child_path.to_str() {
                     if query.regex_enabled() {
@@ -167,7 +167,7 @@ impl Database {
 
                 hits[id as usize].store(true, Ordering::Relaxed);
 
-                let child = &self.entries[id as usize];
+                let child = &self.nodes[id as usize];
                 if child.has_any_child() {
                     self.match_all_descendants(child, hits, aborted)?;
                 }
@@ -185,15 +185,15 @@ impl Database {
         {
             let iter = sorted_ids
                 .par_iter()
-                .map(|id| (*id, &self.entries[*id as usize]));
+                .map(|id| (*id, &self.nodes[*id as usize]));
             match query.sort_order() {
                 SortOrder::Ascending => iter.filter_map(func).collect(),
                 SortOrder::Descending => iter.rev().filter_map(func).collect(),
             }
         } else {
-            let mut v = (0..self.entries.len() as u32)
+            let mut v = (0..self.nodes.len() as u32)
                 .into_par_iter()
-                .zip(self.entries.par_iter())
+                .zip(self.nodes.par_iter())
                 .filter_map(func)
                 .collect::<Result<Vec<_>>>()?;
 
@@ -213,9 +213,9 @@ impl Database {
         if query.sort_dirs_before_files() {
             hits.map(|mut hits| {
                 hits.as_parallel_slice_mut().par_sort_by(|a, b| {
-                    self.entries[b.0 as usize]
+                    self.nodes[b.0 as usize]
                         .is_dir
-                        .cmp(&self.entries[a.0 as usize].is_dir)
+                        .cmp(&self.nodes[a.0 as usize].is_dir)
                 });
                 hits
             })
