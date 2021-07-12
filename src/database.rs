@@ -121,11 +121,11 @@ impl Database {
         // -- Slow path --
 
         // "path" in the sense of graph
-        fn path_from_root(db: &Database, mut id: u32) -> impl Iterator<Item = &str> {
+        fn path_from_root(db: &Database, mut id: u32) -> impl Iterator<Item = u32> {
             let mut path = Vec::new();
             loop {
                 let node = &db.nodes[id as usize];
-                path.push(db.basename_from_node(node));
+                path.push(id);
                 if node.parent == id {
                     // root node
                     return path.into_iter().rev();
@@ -135,7 +135,23 @@ impl Database {
             }
         }
 
-        Iterator::cmp(path_from_root(self, id_a), path_from_root(self, id_b))
+        let mut path_a = path_from_root(self, id_a);
+        let mut path_b = path_from_root(self, id_b);
+        loop {
+            match (path_a.next(), path_b.next()) {
+                (Some(a), Some(b)) if a == b => continue,
+                (None, None) => return Ordering::Equal,
+                (None, Some(_)) => return Ordering::Less, // /foo vs. /foo/bar
+                (Some(_), None) => return Ordering::Greater, // /foo/bar vs. /foo
+                (Some(a), Some(b)) => {
+                    // /foo/bar vs. /foo/baz
+                    return Ord::cmp(
+                        self.basename_from_node(&self.nodes[a as usize]),
+                        self.basename_from_node(&self.nodes[b as usize]),
+                    );
+                }
+            }
+        }
     }
 }
 
