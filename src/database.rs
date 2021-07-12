@@ -8,8 +8,9 @@ pub use builder::DatabaseBuilder;
 use crate::{mode::Mode, Result};
 
 use enum_map::{Enum, EnumMap};
+use fxhash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, collections::HashMap, path::PathBuf, time::SystemTime};
+use std::{cmp::Ordering, path::PathBuf, time::SystemTime};
 use strum_macros::{Display, EnumIter};
 
 // Database can have multiple "root" entries, which correspond to directories
@@ -20,7 +21,7 @@ pub struct Database {
     /// names of all entries concatenated
     name_arena: String,
     nodes: Vec<EntryNode>,
-    root_paths: HashMap<u32, PathBuf>,
+    root_paths: FxHashMap<u32, PathBuf>,
     size: Option<Vec<u64>>,
     mode: Option<Vec<Mode>>,
     created: Option<Vec<SystemTime>>,

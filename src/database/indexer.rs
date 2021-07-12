@@ -2,10 +2,10 @@ use super::{builder::StatusFlags, util, Database, EntryNode, StatusKind};
 use crate::{mode::Mode, Error, Result};
 
 use enum_map::{enum_map, EnumMap};
+use fxhash::FxHashMap;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::{
-    collections::HashMap,
     fs::{self, FileType, Metadata},
     mem,
     ops::Range,
@@ -58,7 +58,7 @@ impl<'a> Indexer<'a> {
         let database = Database {
             name_arena: String::new(),
             nodes: Vec::new(),
-            root_paths: HashMap::new(),
+            root_paths: FxHashMap::default(),
             size: options.index_flags[StatusKind::Size].then(Vec::new),
             mode: options.index_flags[StatusKind::Mode].then(Vec::new),
             created: options.index_flags[StatusKind::Created].then(Vec::new),
