@@ -84,6 +84,35 @@ pub fn sanitize_system_time(time: &SystemTime) -> SystemTime {
     }
 }
 
+#[cfg(unix)]
+#[inline]
+pub fn is_hidden(dent: &std::fs::DirEntry) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+
+    dent.path()
+        .file_name()
+        .map(|filename| filename.as_bytes().get(0) == Some(&b'.'))
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+#[inline]
+pub fn is_hidden(dent: &std::fs::DirEntry) -> bool {
+    use crate::mode::Mode;
+
+    if let Ok(metadata) = dent.metadata() {
+        if Mode::from(&metadata).is_hidden() {
+            return true;
+        }
+    }
+
+    dent.path()
+        .file_name()
+        .and_then(|filename| filename.to_str())
+        .map(|s| s.starts_with('.'))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,8 +1,9 @@
-mod build;
+mod builder;
+mod indexer;
 mod search;
 mod util;
 
-pub use build::DatabaseBuilder;
+pub use builder::DatabaseBuilder;
 
 use crate::{mode::Mode, Result};
 
