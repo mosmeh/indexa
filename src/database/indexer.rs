@@ -3,12 +3,12 @@ use crate::{mode::Mode, Error, Result};
 
 use enum_map::{enum_map, EnumMap};
 use fxhash::FxHashMap;
+use hashbrown::{hash_map::RawEntryMut, HashMap};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::{
     fs::{self, FileType, Metadata},
     mem,
-    ops::Range,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -50,7 +50,7 @@ impl IndexOptions {
 
 pub struct Indexer<'a> {
     options: &'a IndexOptions,
-    database: Database,
+    ctx: WalkContext,
 }
 
 impl<'a> Indexer<'a> {
@@ -67,75 +67,135 @@ impl<'a> Indexer<'a> {
             sorted_ids: EnumMap::default(),
         };
 
-        Self { options, database }
+        Self {
+            options,
+            ctx: WalkContext::new(database),
+        }
     }
 
     pub fn index<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
         let mut root_info = EntryInfo::from_path(path.as_ref(), self.options)?;
-
         let dir_entries = mem::take(&mut root_info.dir_entries);
 
-        let root_node_id = self.database.nodes.len() as u32;
-        self.database.push_entry(root_info, root_node_id);
-        self.database
+        let root_node_id = self.ctx.database.nodes.len() as u32;
+        self.ctx.push_entry(root_info, root_node_id);
+        self.ctx
+            .database
             .root_paths
             .insert(root_node_id, path.as_ref().to_path_buf());
 
-        if !dir_entries.is_empty() {
-            let database = Mutex::new(self.database);
-            walk_file_system(&database, self.options, root_node_id, dir_entries);
-            self.database = database.into_inner();
+        if dir_entries.is_empty() {
+            return Ok(self);
         }
+
+        let ctx = Mutex::new(self.ctx);
+        walk_file_system(&ctx, self.options, root_node_id, dir_entries);
+        self.ctx = ctx.into_inner();
 
         Ok(self)
     }
 
     pub fn finish(self) -> Database {
-        self.database
+        self.ctx.into_inner()
     }
 }
 
-impl Database {
+/// Span in name_arena
+struct NameSpan {
+    start: usize,
+    len: u16,
+}
+
+struct WalkContext {
+    database: Database,
+
+    // Set of spans which represent interned strings.
+    // HashMap (instead of HashSet) is used here to make use of raw_entry_mut().
+    // Also, () is specified as HashBuilder since we don't use the default hasher.
+    // Each hash value is caluculated from a string NameSpan represents.
+    name_spans: HashMap<NameSpan, (), ()>,
+}
+
+impl WalkContext {
+    fn new(database: Database) -> WalkContext {
+        Self {
+            database,
+            name_spans: HashMap::with_hasher(()),
+        }
+    }
+
+    fn into_inner(self) -> Database {
+        self.database
+    }
+
     fn push_entry(&mut self, info: EntryInfo, parent_id: u32) {
-        self.nodes.push(EntryNode {
-            name_start: self.name_arena.len(),
-            name_len: info.name.len() as u16,
+        let hash = fxhash::hash64(&info.name);
+        let hash_entry = {
+            let name_arena = &self.database.name_arena;
+            self.name_spans.raw_entry_mut().from_hash(hash, |span| {
+                name_arena[span.start..][..span.len as usize] == info.name
+            })
+        };
+
+        let name_len = info.name.len() as u16;
+        let name_start = match hash_entry {
+            RawEntryMut::Occupied(entry) => {
+                let NameSpan { start, len } = *entry.key();
+                debug_assert_eq!(len, name_len);
+                start
+            }
+            RawEntryMut::Vacant(entry) => {
+                let name_arena = &mut self.database.name_arena;
+                let start = name_arena.len();
+                name_arena.push_str(&info.name);
+                entry.insert_with_hasher(
+                    hash,
+                    NameSpan {
+                        start,
+                        len: name_len,
+                    },
+                    (),
+                    |span| fxhash::hash64(&name_arena[span.start..][..span.len as usize]),
+                );
+                start
+            }
+        };
+        debug_assert_eq!(
+            &self.database.name_arena[name_start..][..info.name.len()],
+            info.name
+        );
+
+        self.database.nodes.push(EntryNode {
+            name_start,
+            name_len,
             parent: parent_id,
             child_start: u32::MAX,
             child_end: u32::MAX,
             is_dir: info.ftype.is_dir(),
         });
-        self.name_arena.push_str(&info.name);
 
         if let Some(status) = info.status {
-            if let Some(size) = &mut self.size {
+            if let Some(size) = &mut self.database.size {
                 size.push(status.size.unwrap());
             }
-            if let Some(mode) = &mut self.mode {
+            if let Some(mode) = &mut self.database.mode {
                 mode.push(status.mode.unwrap());
             }
-            if let Some(created) = &mut self.created {
+            if let Some(created) = &mut self.database.created {
                 created.push(status.created.unwrap());
             }
-            if let Some(modified) = &mut self.modified {
+            if let Some(modified) = &mut self.database.modified {
                 modified.push(status.modified.unwrap());
             }
-            if let Some(accessed) = &mut self.accessed {
+            if let Some(accessed) = &mut self.database.accessed {
                 accessed.push(status.accessed.unwrap());
             }
         }
     }
-
-    #[inline]
-    fn set_children(&mut self, id: u32, range: Range<u32>) {
-        let mut node = &mut self.nodes[id as usize];
-        node.child_start = range.start;
-        node.child_end = range.end;
-    }
 }
 
 fn walk_file_system(
-    database: &Mutex<Database>,
+    ctx: &Mutex<WalkContext>,
     options: &IndexOptions,
     parent_id: u32,
     dir_entries: Vec<DirEntry>,
@@ -155,18 +215,21 @@ fn walk_file_system(
         .collect();
 
     let (dir_start, dir_end) = {
-        let mut database = database.lock();
+        let mut ctx = ctx.lock();
 
-        let child_start = database.nodes.len() as u32;
+        let child_start = ctx.database.nodes.len() as u32;
         let dir_end = child_start + child_dirs.len() as u32;
         let child_end = dir_end + child_files.len() as u32;
 
-        database.set_children(parent_id, child_start..child_end);
+        let mut parent_node = &mut ctx.database.nodes[parent_id as usize];
+        parent_node.child_start = child_start;
+        parent_node.child_end = child_end;
+
         for info in child_dirs {
-            database.push_entry(info, parent_id);
+            ctx.push_entry(info, parent_id);
         }
         for info in child_files {
-            database.push_entry(info, parent_id);
+            ctx.push_entry(info, parent_id);
         }
 
         (child_start, dir_end)
@@ -176,7 +239,7 @@ fn walk_file_system(
         .into_par_iter()
         .zip(child_dir_entries.into_par_iter())
         .filter(|(_, dir_entries)| !dir_entries.is_empty())
-        .for_each(|(id, dir_entries)| walk_file_system(database, options, id, dir_entries));
+        .for_each(|(id, dir_entries)| walk_file_system(ctx, options, id, dir_entries));
 }
 
 fn list_dir<P: AsRef<Path>>(path: P, options: &IndexOptions) -> Result<(Vec<DirEntry>, u64)> {
