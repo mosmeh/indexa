@@ -56,7 +56,7 @@ impl Database {
 
         let regex_tls = ThreadLocal::new();
 
-        if query.regex_enabled() {
+        if query.is_regex_enabled() {
             for (root_id, root_path) in &self.root_paths {
                 let root_node = &self.nodes[*root_id as usize];
                 if query.regex().is_match(root_path.to_str().unwrap()) {
@@ -122,7 +122,7 @@ impl Database {
                 let child = &self.nodes[id as usize];
                 let child_path = path.join(&self.basename_from_node(child));
                 if let Some(s) = child_path.to_str() {
-                    if query.regex_enabled() {
+                    if query.is_regex_enabled() {
                         if regex.is_match(s) {
                             hits[id as usize].store(true, Ordering::Relaxed);
                         }

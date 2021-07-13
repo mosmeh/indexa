@@ -12,7 +12,7 @@ use std::{borrow::Cow, ops::Range};
 pub struct Query {
     regex: Regex,
     match_path: bool,
-    regex_enabled: bool,
+    is_regex_enabled: bool,
     sort_by: StatusKind,
     sort_order: SortOrder,
     sort_dirs_before_files: bool,
@@ -30,8 +30,8 @@ impl Query {
     }
 
     #[inline]
-    pub fn regex_enabled(&self) -> bool {
-        self.regex_enabled
+    pub fn is_regex_enabled(&self) -> bool {
+        self.is_regex_enabled
     }
 
     #[inline]
@@ -104,7 +104,7 @@ pub struct QueryBuilder<'a> {
     pattern: Cow<'a, str>,
     match_path_mode: MatchPathMode,
     case_sensitivity: CaseSensitivity,
-    regex: bool,
+    is_regex_enabled: bool,
     sort_by: StatusKind,
     sort_order: SortOrder,
     sort_dirs_before_files: bool,
@@ -119,7 +119,7 @@ impl<'a> QueryBuilder<'a> {
             pattern: query_str.into(),
             match_path_mode: MatchPathMode::Never,
             case_sensitivity: CaseSensitivity::Smart,
-            regex: false,
+            is_regex_enabled: false,
             sort_by: StatusKind::Basename,
             sort_order: SortOrder::Ascending,
             sort_dirs_before_files: false,
@@ -137,7 +137,7 @@ impl<'a> QueryBuilder<'a> {
     }
 
     pub fn regex(&mut self, yes: bool) -> &mut Self {
-        self.regex = yes;
+        self.is_regex_enabled = yes;
         self
     }
 
@@ -158,9 +158,9 @@ impl<'a> QueryBuilder<'a> {
 
     pub fn build(&self) -> Result<Query> {
         let case_sensitive =
-            should_be_case_sensitive(self.case_sensitivity, self.regex, &self.pattern);
+            should_be_case_sensitive(self.case_sensitivity, self.is_regex_enabled, &self.pattern);
 
-        let regex = if self.regex {
+        let regex = if self.is_regex_enabled {
             RegexBuilder::new(&self.pattern)
         } else {
             RegexBuilder::new(&regex::escape(&self.pattern))
@@ -170,8 +170,12 @@ impl<'a> QueryBuilder<'a> {
 
         Ok(Query {
             regex,
-            match_path: should_match_path(self.match_path_mode, self.regex, &self.pattern),
-            regex_enabled: self.regex,
+            match_path: should_match_path(
+                self.match_path_mode,
+                self.is_regex_enabled,
+                &self.pattern,
+            ),
+            is_regex_enabled: self.is_regex_enabled,
             sort_by: self.sort_by,
             sort_order: self.sort_order,
             sort_dirs_before_files: self.sort_dirs_before_files,
@@ -242,12 +246,16 @@ impl MatchDetail<'_, '_> {
     }
 }
 
-fn should_match_path(match_path_mode: MatchPathMode, regex: bool, pattern: &str) -> bool {
+fn should_match_path(
+    match_path_mode: MatchPathMode,
+    is_regex_enabled: bool,
+    pattern: &str,
+) -> bool {
     match match_path_mode {
         MatchPathMode::Always => true,
         MatchPathMode::Never => false,
         MatchPathMode::Auto => {
-            if regex {
+            if is_regex_enabled {
                 regex_helper::pattern_has_path_separator(pattern)
             } else {
                 pattern.contains(std::path::MAIN_SEPARATOR)
@@ -256,12 +264,16 @@ fn should_match_path(match_path_mode: MatchPathMode, regex: bool, pattern: &str)
     }
 }
 
-fn should_be_case_sensitive(case_sensitivity: CaseSensitivity, regex: bool, pattern: &str) -> bool {
+fn should_be_case_sensitive(
+    case_sensitivity: CaseSensitivity,
+    is_regex_enabled: bool,
+    pattern: &str,
+) -> bool {
     match case_sensitivity {
         CaseSensitivity::Sensitive => true,
         CaseSensitivity::Insensitive => false,
         CaseSensitivity::Smart => {
-            if regex {
+            if is_regex_enabled {
                 regex_helper::pattern_has_uppercase_char(pattern)
             } else {
                 pattern.chars().any(|c| c.is_uppercase())
