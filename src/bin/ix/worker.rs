@@ -103,20 +103,20 @@ impl SearcherImpl {
                     let query = query?;
                     let database = self.database.clone();
                     let tx_clone = self.tx.clone();
-                    let aborted = Arc::new(AtomicBool::new(false));
-                    let aborted_clone = aborted.clone();
+                    let abort_signal = Arc::new(AtomicBool::new(false));
+                    let abort_signal_clone = abort_signal.clone();
 
                     thread::spawn(move || {
-                        let hits = database.search(&query, &aborted);
+                        let hits = database.search(&query, &abort_signal);
                         if let Ok(hits) = hits {
-                            if !aborted.load(atomic::Ordering::Relaxed) {
+                            if !abort_signal.load(atomic::Ordering::Relaxed) {
                                 let _ = tx_clone.send(hits);
                             }
                         }
                     });
 
                     self.search.replace(Search {
-                        aborted: aborted_clone,
+                        abort_signal: abort_signal_clone,
                     });
                 },
                 recv(self.stop_rx) -> _ => {
@@ -130,11 +130,11 @@ impl SearcherImpl {
 }
 
 struct Search {
-    aborted: Arc<AtomicBool>,
+    abort_signal: Arc<AtomicBool>,
 }
 
 impl Search {
     fn abort(&self) {
-        self.aborted.store(true, atomic::Ordering::Relaxed);
+        self.abort_signal.store(true, atomic::Ordering::Relaxed);
     }
 }

@@ -16,13 +16,13 @@ use std::{
 use thread_local::ThreadLocal;
 
 impl Database {
-    pub fn search(&self, query: &Query, aborted: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+    pub fn search(&self, query: &Query, abort_signal: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
         if query.is_empty() {
             self.match_all(query)
         } else if query.match_path() {
-            self.match_path(query, aborted)
+            self.match_path(query, abort_signal)
         } else {
-            self.match_basename(query, aborted)
+            self.match_basename(query, abort_signal)
         }
     }
 
@@ -30,14 +30,18 @@ impl Database {
         self.collect_hits(query, |(id, _)| Some(Ok(EntryId(id))))
     }
 
-    fn match_basename(&self, query: &Query, aborted: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+    fn match_basename(
+        &self,
+        query: &Query,
+        abort_signal: &Arc<AtomicBool>,
+    ) -> Result<Vec<EntryId>> {
         // Since rust-lang/regex@e040c1b, regex library stopped using thread_local,
         // which had a performance impact on indexa.
         // We mitigate it by putting Regex in thread local storage.
         let regex_tls = ThreadLocal::new();
 
         self.collect_hits(query, |(id, node)| {
-            if aborted.load(Ordering::Relaxed) {
+            if abort_signal.load(Ordering::Relaxed) {
                 return Some(Err(Error::SearchAbort));
             }
 
@@ -48,7 +52,7 @@ impl Database {
         })
     }
 
-    fn match_path(&self, query: &Query, aborted: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+    fn match_path(&self, query: &Query, abort_signal: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
         let mut hits = Vec::with_capacity(self.nodes.len());
         for _ in 0..self.nodes.len() {
             hits.push(AtomicBool::new(false));
@@ -63,7 +67,7 @@ impl Database {
                     hits[*root_id as usize].store(true, Ordering::Relaxed);
                 }
 
-                self.match_path_impl(root_node, root_path, query, &regex_tls, &hits, aborted)?;
+                self.match_path_impl(root_node, root_path, query, &regex_tls, &hits, abort_signal)?;
             }
         } else {
             for ((root_id, root_path), next_root_id) in self.root_paths.iter().zip(
@@ -78,20 +82,27 @@ impl Database {
                     (*root_id..next_root_id)
                         .into_par_iter()
                         .try_for_each(|id| {
-                            if aborted.load(Ordering::Relaxed) {
+                            if abort_signal.load(Ordering::Relaxed) {
                                 return Err(Error::SearchAbort);
                             }
                             hits[id as usize].store(true, Ordering::Relaxed);
                             Ok(())
                         })?;
                 } else {
-                    self.match_path_impl(root_node, root_path, query, &regex_tls, &hits, aborted)?;
+                    self.match_path_impl(
+                        root_node,
+                        root_path,
+                        query,
+                        &regex_tls,
+                        &hits,
+                        abort_signal,
+                    )?;
                 }
             }
         }
 
         self.collect_hits(query, |(id, _)| {
-            if aborted.load(Ordering::Relaxed) {
+            if abort_signal.load(Ordering::Relaxed) {
                 return Some(Err(Error::SearchAbort));
             }
 
@@ -108,14 +119,14 @@ impl Database {
         query: &Query,
         regex_tls: &ThreadLocal<Regex>,
         hits: &[AtomicBool],
-        aborted: &Arc<AtomicBool>,
+        abort_signal: &Arc<AtomicBool>,
     ) -> Result<()> {
         let regex = regex_tls.get_or(|| query.regex().clone());
 
         (node.child_start..node.child_end)
             .into_par_iter()
             .try_for_each(|id| {
-                if aborted.load(Ordering::Relaxed) {
+                if abort_signal.load(Ordering::Relaxed) {
                     return Err(Error::SearchAbort);
                 }
 
@@ -134,17 +145,24 @@ impl Database {
                                 query,
                                 regex_tls,
                                 hits,
-                                aborted,
+                                abort_signal,
                             )?;
                         }
                     } else if regex.is_match(s) {
                         hits[id as usize].store(true, Ordering::Relaxed);
 
                         if child.has_any_child() {
-                            self.match_all_descendants(child, hits, aborted)?;
+                            self.match_all_descendants(child, hits, abort_signal)?;
                         }
                     } else if child.has_any_child() {
-                        self.match_path_impl(child, &child_path, query, regex_tls, hits, aborted)?;
+                        self.match_path_impl(
+                            child,
+                            &child_path,
+                            query,
+                            regex_tls,
+                            hits,
+                            abort_signal,
+                        )?;
                     }
                 }
 
@@ -156,12 +174,12 @@ impl Database {
         &self,
         node: &EntryNode,
         hits: &[AtomicBool],
-        aborted: &Arc<AtomicBool>,
+        abort_signal: &Arc<AtomicBool>,
     ) -> Result<()> {
         (node.child_start..node.child_end)
             .into_par_iter()
             .try_for_each(|id| {
-                if aborted.load(Ordering::Relaxed) {
+                if abort_signal.load(Ordering::Relaxed) {
                     return Err(Error::SearchAbort);
                 }
 
@@ -169,7 +187,7 @@ impl Database {
 
                 let child = &self.nodes[id as usize];
                 if child.has_any_child() {
-                    self.match_all_descendants(child, hits, aborted)?;
+                    self.match_all_descendants(child, hits, abort_signal)?;
                 }
 
                 Ok(())
