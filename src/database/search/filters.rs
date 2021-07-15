@@ -1,9 +1,11 @@
 mod basename;
+mod component_wise_path;
 mod full_path;
 mod passthrough;
 mod regex_path;
 
 pub use basename::BasenameFilter;
+pub use component_wise_path::ComponentWisePathFilter;
 pub use full_path::FullPathFilter;
 pub use passthrough::PassthroughFilter;
 pub use regex_path::RegexPathFilter;

@@ -21,6 +21,9 @@ impl Database {
         if query.is_regex_enabled() {
             return self.filter_and_sort::<filters::RegexPathFilter>(query, abort_signal);
         }
+        if !query.has_path_separator() {
+            return self.filter_and_sort::<filters::ComponentWisePathFilter>(query, abort_signal);
+        }
         self.filter_and_sort::<filters::FullPathFilter>(query, abort_signal)
     }
 
