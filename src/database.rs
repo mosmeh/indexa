@@ -179,6 +179,8 @@ pub enum StatusKind {
     Accessed,
 }
 
+type StatusFlags = EnumMap<StatusKind, bool>;
+
 #[derive(Debug, Copy, Clone)]
 pub struct EntryId(u32);
 

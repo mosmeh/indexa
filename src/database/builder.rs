@@ -1,14 +1,12 @@
 use super::{
     indexer::{IndexOptions, Indexer},
-    util, Database, EntryId, StatusKind,
+    util, Database, EntryId, StatusFlags, StatusKind,
 };
 use crate::{Error, Result};
 
 use enum_map::{enum_map, EnumMap};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
-
-pub type StatusFlags = EnumMap<StatusKind, bool>;
 
 #[derive(Default)]
 pub struct DatabaseBuilder {

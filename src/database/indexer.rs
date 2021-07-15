@@ -1,4 +1,4 @@
-use super::{builder::StatusFlags, util, Database, EntryNode, StatusKind};
+use super::{util, Database, EntryNode, StatusFlags, StatusKind};
 use crate::{mode::Mode, Error, Result};
 
 use enum_map::{enum_map, EnumMap};
