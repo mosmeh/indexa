@@ -1,8 +1,10 @@
+mod backend;
 mod draw;
 mod handlers;
 mod table;
 mod text_box;
 
+use backend::CustomBackend;
 use table::TableState;
 use text_box::TextBoxState;
 
@@ -23,13 +25,13 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use std::{io, sync::Arc, thread};
-use tui::{backend::CrosstermBackend, Terminal};
+use tui::Terminal;
 
 pub fn run(config: &Config) -> Result<()> {
     TuiApp::new(config)?.run()
 }
 
-type Backend = CrosstermBackend<io::Stderr>;
+type Backend = CustomBackend<io::Stderr>;
 
 enum State {
     Loading,
@@ -149,7 +151,7 @@ fn setup_terminal() -> Result<Terminal<Backend>> {
     terminal::enable_raw_mode()?;
     let mut stderr = io::stderr();
     crossterm::execute!(stderr, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stderr);
+    let backend = CustomBackend::new(stderr);
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
     terminal.clear()?;
