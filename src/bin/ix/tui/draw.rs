@@ -15,7 +15,8 @@ use std::{ops::Range, time::SystemTime};
 use tui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Paragraph, Text},
+    text::Span,
+    widgets::Paragraph,
     Frame,
 };
 
@@ -37,7 +38,7 @@ impl<'a> TuiApp<'a> {
         self.draw_status_bar(f, chunks[1]);
 
         // path of selected row
-        let text = vec![Text::raw(
+        let text = Span::raw(
             self.hits
                 .get(self.table_state.selected())
                 .and_then(|id| {
@@ -50,18 +51,18 @@ impl<'a> TuiApp<'a> {
                         .map(|s| s.to_string())
                 })
                 .unwrap_or_else(|| "".to_string()),
-        )];
-        let paragraph = Paragraph::new(text.iter());
+        );
+        let paragraph = Paragraph::new(text);
         f.render_widget(paragraph, chunks[2]);
 
         // input box
         let text_box = TextBox::new()
             .highlight_style(Style::default().fg(Color::Black).bg(Color::White))
-            .prompt(Text::styled(
+            .prompt(Span::styled(
                 "> ",
                 Style::default()
                     .fg(self.config.ui.colors.prompt)
-                    .modifier(Modifier::BOLD),
+                    .add_modifier(Modifier::BOLD),
             ));
         f.render_stateful_widget(text_box, chunks[3], &mut self.text_box_state);
     }
@@ -164,10 +165,10 @@ impl<'a> TuiApp<'a> {
 
     fn draw_status_bar(&self, f: &mut Frame<Backend>, area: Rect) {
         let message = match &self.status {
-            State::Loading => Text::raw("Loading database"),
-            State::Searching => Text::raw("Searching"),
-            State::Ready | State::Aborted | State::Accepted => Text::raw("Ready"),
-            State::InvalidQuery(msg) => Text::styled(
+            State::Loading => Span::raw("Loading database"),
+            State::Searching => Span::raw("Searching"),
+            State::Ready | State::Aborted | State::Accepted => Span::raw("Ready"),
+            State::InvalidQuery(msg) => Span::styled(
                 msg,
                 Style::default().fg(self.config.ui.colors.error_fg).bg(self
                     .config
@@ -191,12 +192,11 @@ impl<'a> TuiApp<'a> {
             .direction(Direction::Horizontal)
             .split(area);
 
-        let message = vec![message];
-        let message = Paragraph::new(message.iter());
+        let message = Paragraph::new(message);
         f.render_widget(message, chunks[0]);
 
-        let counter = vec![Text::raw(counter)];
-        let counter = Paragraph::new(counter.iter()).alignment(Alignment::Right);
+        let counter = Span::raw(counter);
+        let counter = Paragraph::new(counter).alignment(Alignment::Right);
         f.render_widget(counter, chunks[1]);
     }
 

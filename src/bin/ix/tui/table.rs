@@ -1,7 +1,7 @@
 // The MIT License (MIT)
 //
 // Copyright (c) 2016 Florian Dehau
-// Copyright (c) 2020 mosm
+// Copyright (c) 2020-present mosm
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,8 @@ use tui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Rect},
     style::Style,
-    widgets::{Block, Paragraph, StatefulWidget, Text, Widget},
+    text::{Span, Spans},
+    widgets::{Block, Paragraph, StatefulWidget, Widget},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -262,16 +263,15 @@ where
     type State = TableState;
 
     fn render(mut self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        // Render block if necessary and get the drawing area
-        let table_area = match self.block {
-            Some(ref mut b) => {
+        buf.set_style(area, self.style);
+        let table_area = match self.block.take() {
+            Some(b) => {
+                let inner_area = b.inner(area);
                 b.render(area, buf);
-                b.inner(area)
+                inner_area
             }
             None => area,
         };
-
-        buf.set_background(table_area, self.style.bg);
 
         let mut solver = Solver::new();
         let mut var_indices = HashMap::new();
@@ -343,10 +343,8 @@ where
                     width: *w,
                     height: 1,
                 };
-                let text = Text::styled(t.to_string(), self.header_style);
-                Paragraph::new(vec![&text].into_iter())
-                    .alignment(alignment)
-                    .render(area, buf);
+                let text = Span::styled(t.to_string(), self.header_style);
+                Paragraph::new(text).alignment(alignment).render(area, buf);
 
                 x += *w + self.column_spacing;
             }
@@ -411,16 +409,12 @@ where
 
                     match elt {
                         HighlightableText::Raw(text) => {
-                            let text = Text::styled(&text, style);
-                            Paragraph::new(vec![&text].into_iter())
-                                .alignment(alignment)
-                                .render(area, buf);
+                            let text = Span::styled(&text, style);
+                            Paragraph::new(text).alignment(alignment).render(area, buf);
                         }
                         HighlightableText::Highlighted(text, ranges) => {
-                            let texts = build_texts(&text, ranges, &style, &highlight_style);
-                            Paragraph::new(texts.iter())
-                                .alignment(alignment)
-                                .render(area, buf);
+                            let text = build_spans(&text, ranges, &style, &highlight_style);
+                            Paragraph::new(text).alignment(alignment).render(area, buf);
                         }
                     }
 
@@ -446,12 +440,12 @@ where
     }
 }
 
-fn build_texts<'t, M>(
+fn build_spans<'t, M>(
     text: &'t str,
     matches: M,
     style: &Style,
     highlight_style: &Style,
-) -> Vec<Text<'t>>
+) -> Spans<'t>
 where
     M: Iterator<Item = Range<usize>>,
 {
@@ -459,15 +453,15 @@ where
     let mut texts = Vec::new();
     for m in matches {
         if m.start > prev_end {
-            texts.push(Text::styled(&text[prev_end..m.start], *style));
+            texts.push(Span::styled(&text[prev_end..m.start], *style));
         }
         if m.end > m.start {
-            texts.push(Text::styled(&text[m.start..m.end], *highlight_style));
+            texts.push(Span::styled(&text[m.start..m.end], *highlight_style));
         }
         prev_end = m.end;
     }
     if prev_end < text.len() {
-        texts.push(Text::styled(&text[prev_end..], *style));
+        texts.push(Span::styled(&text[prev_end..], *style));
     }
-    texts
+    Spans::from(texts)
 }

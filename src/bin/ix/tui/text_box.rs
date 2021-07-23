@@ -2,7 +2,8 @@ use tui::{
     buffer::Buffer,
     layout::Rect,
     style::Style,
-    widgets::{Paragraph, StatefulWidget, Text, Widget},
+    text::{Span, Spans},
+    widgets::{Paragraph, StatefulWidget, Widget},
 };
 use unicode_segmentation::{GraphemeCursor, UnicodeSegmentation};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -10,7 +11,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 pub struct TextBox<'b> {
     style: Style,
     highlight_style: Style,
-    prompt: Text<'b>,
+    prompt: Span<'b>,
 }
 
 impl<'b> TextBox<'b> {
@@ -18,7 +19,7 @@ impl<'b> TextBox<'b> {
         Self {
             style: Default::default(),
             highlight_style: Default::default(),
-            prompt: Text::raw(""),
+            prompt: Span::raw(""),
         }
     }
 
@@ -33,7 +34,7 @@ impl<'b> TextBox<'b> {
         self
     }
 
-    pub fn prompt(mut self, prompt: Text<'b>) -> Self {
+    pub fn prompt(mut self, prompt: Span<'b>) -> Self {
         self.prompt = prompt;
         self
     }
@@ -47,16 +48,16 @@ impl StatefulWidget for TextBox<'_> {
         let mut text = vec![self.prompt.clone()];
         text.extend(grapheme_indices.map(|(i, grapheme)| {
             if i == state.grapheme_cursor.cur_cursor() {
-                Text::styled(grapheme, self.highlight_style)
+                Span::styled(grapheme, self.highlight_style)
             } else {
-                Text::styled(grapheme, self.style)
+                Span::styled(grapheme, self.style)
             }
         }));
         if state.grapheme_cursor.cur_cursor() >= state.text.len() {
-            text.push(Text::styled(" ", self.highlight_style));
+            text.push(Span::styled(" ", self.highlight_style));
         }
 
-        let paragraph = Paragraph::new(text.iter());
+        let paragraph = Paragraph::new(Spans::from(text));
         paragraph.render(area, buf);
     }
 }
