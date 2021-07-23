@@ -8,15 +8,11 @@ A locate alternative with incremental search
 
 ## Installation
 
-Clone this repository and run:
-
 ```sh
-cargo install --path .
+cargo install --git https://github.com/mosmeh/indexa
 ```
 
 ## Usage
-
-Try the following:
 
 ```sh
 # view and search files & directories
@@ -24,6 +20,12 @@ ix
 
 # choose which file to open in vi
 vi $(ix)
+
+# use regex
+ix -r
+
+# match full path
+ix -p
 ```
 
 On the first launch, indexa will ask you if you want to create a database with a default configuration.
@@ -40,12 +42,12 @@ indexa's configuration file is located at `~/.config/indexa/config.toml` on Unix
 
 ## Key bindings
 
-- <kbd>Enter</kbd> to select current line and quit
-- <kbd>ESC</kbd> / <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>G</kbd> to abort
-- <kbd>Up</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd>, <kbd>Down</kbd> / <kbd>Ctrl</kbd>+<kbd>N</kbd>, <kbd>Page Up</kbd>, and <kbd>Page Down</kbd> to move cursor up/down
-- <kbd>Ctrl</kbd>+<kbd>Home</kbd> / <kbd>Shift</kbd>+<kbd>Home</kbd> and <kbd>Ctrl</kbd>+<kbd>End</kbd> / <kbd>Shift</kbd>+<kbd>End</kbd> to scroll to top/bottom of the list
-- <kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Home</kbd> and <kbd>Ctrl</kbd>+<kbd>E</kbd> / <kbd>End</kbd> to move cursor to beginning/end of query
-- <kbd>Ctrl</kbd>+<kbd>U</kbd> to clear the query
+-   <kbd>Enter</kbd> to select current line and quit
+-   <kbd>ESC</kbd> / <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>G</kbd> to abort
+-   <kbd>Up</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd>, <kbd>Down</kbd> / <kbd>Ctrl</kbd>+<kbd>N</kbd>, <kbd>Page Up</kbd>, and <kbd>Page Down</kbd> to move cursor up/down
+-   <kbd>Ctrl</kbd>+<kbd>Home</kbd> / <kbd>Shift</kbd>+<kbd>Home</kbd> and <kbd>Ctrl</kbd>+<kbd>End</kbd> / <kbd>Shift</kbd>+<kbd>End</kbd> to scroll to top/bottom of the list
+-   <kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Home</kbd> and <kbd>Ctrl</kbd>+<kbd>E</kbd> / <kbd>End</kbd> to move cursor to beginning/end of query
+-   <kbd>Ctrl</kbd>+<kbd>U</kbd> to clear the query
 
 ## Command-line options
 
