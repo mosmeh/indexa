@@ -67,7 +67,6 @@ impl<'a> TuiApp<'a> {
         f.render_stateful_widget(text_box, chunks[3], &mut self.text_box_state);
     }
 
-    #[allow(clippy::needless_collect)] // false positive
     fn draw_table(&mut self, f: &mut Frame<Backend>, area: Rect, terminal_width: u16) {
         let columns = &self.config.ui.columns;
 
@@ -82,6 +81,7 @@ impl<'a> TuiApp<'a> {
             }
         });
 
+        #[allow(clippy::needless_collect)] // false positive
         let display_func = |id: &EntryId| {
             let entry = self.database.as_ref().unwrap().entry(*id);
             let match_detail = self.query.as_ref().unwrap().match_detail(&entry).unwrap();

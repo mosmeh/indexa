@@ -22,7 +22,6 @@ impl From<u32> for Mode {
 }
 
 impl Mode {
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Default::default()
     }

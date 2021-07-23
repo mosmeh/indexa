@@ -238,13 +238,11 @@ where
         self
     }
 
-    #[allow(dead_code)]
     pub fn column_spacing(mut self, spacing: u16) -> Table<'a, H, R, F> {
         self.column_spacing = spacing;
         self
     }
 
-    #[allow(dead_code)]
     pub fn header_gap(mut self, gap: u16) -> Table<'a, H, R, F> {
         self.header_gap = gap;
         self
