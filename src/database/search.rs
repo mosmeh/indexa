@@ -57,11 +57,21 @@ impl Database {
         };
 
         if query.sort_dirs_before_files() {
-            hits.as_parallel_slice_mut().par_sort_by(|a, b| {
-                self.nodes[*b as usize]
-                    .is_dir
-                    .cmp(&self.nodes[*a as usize].is_dir)
-            });
+            let slice = hits.as_parallel_slice_mut();
+            match query.sort_order() {
+                SortOrder::Ascending => slice.par_sort_by(|a, b| {
+                    Ord::cmp(
+                        &self.nodes[*b as usize].is_dir,
+                        &self.nodes[*a as usize].is_dir,
+                    )
+                }),
+                SortOrder::Descending => slice.par_sort_by(|a, b| {
+                    Ord::cmp(
+                        &self.nodes[*a as usize].is_dir,
+                        &self.nodes[*b as usize].is_dir,
+                    )
+                }),
+            }
         }
 
         Ok(hits.into_iter().map(EntryId).collect())
