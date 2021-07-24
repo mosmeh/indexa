@@ -1,5 +1,5 @@
 [flags]
-auto_match_path = true
+match_path = "auto"
 
 [database]
 location = "database.db"

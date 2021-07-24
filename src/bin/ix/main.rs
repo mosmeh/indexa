@@ -4,17 +4,40 @@ mod worker;
 
 use crate::config::Config;
 
-use indexa::database::DatabaseBuilder;
+use indexa::{database::DatabaseBuilder, query::MatchPathMode};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use dialoguer::Confirm;
 use rayon::ThreadPoolBuilder;
 use std::{
     fs::{self, File},
     io::{BufWriter, Write},
     path::{Path, PathBuf},
+    str::FromStr,
 };
 use structopt::{clap::AppSettings, StructOpt};
+
+#[derive(Debug, Clone, Copy)]
+struct MatchPathOpt(MatchPathMode);
+
+impl FromStr for MatchPathOpt {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let m = match s.to_lowercase().as_str() {
+            "always" | "yes" => MatchPathMode::Always,
+            "never" | "no" => MatchPathMode::Never,
+            "auto" => MatchPathMode::Auto,
+            _ => {
+                return Err(anyhow!(format!(
+                    "Invalid value '{}'. Valid values are 'always', 'never', or 'auto'.",
+                    s
+                )))
+            }
+        };
+        Ok(Self(m))
+    }
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -42,13 +65,14 @@ pub struct Opt {
     #[structopt(short = "i", long, overrides_with_all = &["case-sensitive", "ignore-case"])]
     ignore_case: bool,
 
-    /// Search in path.
-    #[structopt(short = "p", long)]
-    match_path: bool,
-
-    /// Search in path when query contains path separators.
-    #[structopt(long)]
-    auto_match_path: bool,
+    /// Match path.
+    ///
+    /// <when> can be 'always' (default if omitted), 'auto', or 'never'.
+    /// With 'auto', it matches path only when query contains path separators.
+    ///
+    /// Defaults to 'never'.
+    #[structopt(short = "p", long, name = "when")]
+    match_path: Option<Option<MatchPathOpt>>,
 
     /// Enable regex.
     #[structopt(short, long)]
@@ -60,11 +84,11 @@ pub struct Opt {
 
     /// Number of threads to use.
     ///
-    /// Defaults to the number of available CPUs - 1.
+    /// Defaults to the number of available CPUs minus 1.
     #[structopt(short, long)]
     threads: Option<usize>,
 
-    /// Location of the config file.
+    /// Location of a config file.
     #[structopt(short = "C", long)]
     config: Option<PathBuf>,
 }
@@ -78,7 +102,7 @@ fn main() -> Result<()> {
         location
     } else {
         return Err(anyhow!(
-            "Could not determine the location of database file. Please edit the config file."
+            "Could not determine the location of the database file. Please edit the config file."
         ));
     };
 

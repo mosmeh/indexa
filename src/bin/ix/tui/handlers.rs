@@ -170,7 +170,7 @@ impl<'a> TuiApp<'a> {
 
         let query = self.text_box_state.text();
         let query = QueryBuilder::new(query)
-            .match_path_mode(self.config.flags.match_path_mode())
+            .match_path_mode(self.config.flags.match_path)
             .case_sensitivity(self.config.flags.case_sensitivity())
             .regex(self.config.flags.regex)
             .sort_by(self.config.ui.sort_by)

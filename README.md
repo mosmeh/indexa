@@ -56,17 +56,16 @@ USAGE:
     ix [FLAGS] [OPTIONS]
 
 FLAGS:
-    -s, --case-sensitive     Search case-sensitively
-    -i, --ignore-case        Search case-insensitively
-    -p, --match-path         Search in path
-        --auto-match-path    Search in path when query contains path separators
-    -r, --regex              Enable regex
-    -u, --update             Update database and exit
-    -h, --help               Prints help information
-    -V, --version            Prints version information
+    -s, --case-sensitive    Search case-sensitively
+    -i, --ignore-case       Search case-insensitively
+    -r, --regex             Enable regex
+    -u, --update            Update database and exit
+    -h, --help              Prints help information
+    -V, --version           Prints version information
 
 OPTIONS:
     -q, --query <query>        Initial query
+    -p, --match-path <when>    Match path
     -t, --threads <threads>    Number of threads to use
-    -C, --config <config>      Location of the config file
+    -C, --config <config>      Location of a config file
 ```

@@ -15,11 +15,11 @@
 # Defaults to smart case.
 # ignore_case = false
 
-# Whether to search in path.
-# match_path = false
-
-# Whether to search in path when query contains path separators.
-# auto_match_path = false
+# Whether to match path.
+# Defaults to "never".
+# match_path = "always"
+# match_path = "never"
+# match_path = "auto" # match path only when query contains path separators
 
 # Whether to enable regex.
 # regex = true
@@ -29,7 +29,7 @@
 # threads = 4
 
 [database]
-# Location of database file. Defaults to {user's data directory}/indexa/database.db
+# Location of a database file. Defaults to {user's data directory}/indexa/database.db
 # location = "/path/to/database/database.db"
 
 # File/directory statuses to index.

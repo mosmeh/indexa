@@ -1,6 +1,6 @@
 [flags]
 ignore_case = true
-auto_match_path = true
+match_path = "auto"
 
 [database]
 index = [

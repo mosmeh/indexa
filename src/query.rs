@@ -83,9 +83,12 @@ impl Query {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MatchPathMode {
+    #[serde(alias = "yes")]
     Always,
+    #[serde(alias = "no")]
     Never,
     Auto,
 }

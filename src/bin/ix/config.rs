@@ -30,8 +30,7 @@ pub struct FlagConfig {
     pub query: Option<String>,
     pub case_sensitive: bool,
     pub ignore_case: bool,
-    pub match_path: bool,
-    pub auto_match_path: bool,
+    pub match_path: MatchPathMode,
     pub regex: bool,
     pub threads: usize,
 }
@@ -42,8 +41,7 @@ impl Default for FlagConfig {
             query: None,
             case_sensitive: false,
             ignore_case: false,
-            match_path: false,
-            auto_match_path: false,
+            match_path: MatchPathMode::Never,
             regex: false,
             threads: (num_cpus::get() - 1).max(1),
         }
@@ -68,22 +66,14 @@ impl FlagConfig {
             self.ignore_case = opt.ignore_case;
         }
 
-        self.match_path |= opt.match_path;
-        self.auto_match_path |= opt.auto_match_path;
+        if let Some(m) = opt.match_path {
+            self.match_path = m.map(|x| x.0).unwrap_or(MatchPathMode::Always);
+        }
+
         self.regex |= opt.regex;
 
         if let Some(threads) = opt.threads {
             self.threads = threads.min(num_cpus::get() - 1).max(1);
-        }
-    }
-
-    pub fn match_path_mode(&self) -> MatchPathMode {
-        if self.match_path {
-            MatchPathMode::Always
-        } else if self.auto_match_path {
-            MatchPathMode::Auto
-        } else {
-            MatchPathMode::Never
         }
     }
 
@@ -271,7 +261,7 @@ where
     P: AsRef<Path>,
 {
     const CONFIG_LOCATION_ERROR_MSG: &str = "Could not determine the location of config file. \
-    Please provide the location of config file with -C/--config option.";
+    Please provide a location of config file with -C/--config option.";
 
     let path = if let Some(path) = config_path.as_ref() {
         Cow::Borrowed(path.as_ref())
