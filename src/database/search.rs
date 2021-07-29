@@ -11,7 +11,16 @@ use rayon::prelude::*;
 use std::sync::{atomic::AtomicBool, Arc};
 
 impl Database {
-    pub fn search(&self, query: &Query, abort_signal: &Arc<AtomicBool>) -> Result<Vec<EntryId>> {
+    pub fn search(&self, query: &Query) -> Result<Vec<EntryId>> {
+        let abort_signal = Arc::new(AtomicBool::new(false));
+        self.abortable_search(query, &abort_signal)
+    }
+
+    pub fn abortable_search(
+        &self,
+        query: &Query,
+        abort_signal: &Arc<AtomicBool>,
+    ) -> Result<Vec<EntryId>> {
         if query.is_empty() {
             return self.filter_and_sort::<filters::PassthroughFilter>(query, abort_signal);
         }

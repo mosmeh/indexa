@@ -107,7 +107,7 @@ impl SearcherImpl {
                     let abort_signal_clone = abort_signal.clone();
 
                     thread::spawn(move || {
-                        let hits = database.search(&query, &abort_signal);
+                        let hits = database.abortable_search(&query, &abort_signal);
                         if let Ok(hits) = hits {
                             if !abort_signal.load(atomic::Ordering::Relaxed) {
                                 let _ = tx_clone.send(hits);
