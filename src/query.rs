@@ -73,13 +73,53 @@ impl Query {
         }
     }
 
-    #[inline]
-    pub fn match_detail<'a, 'b>(&'a self, entry: &'b Entry) -> Result<MatchDetail<'a, 'b>> {
-        Ok(MatchDetail {
-            query: self,
-            basename: entry.basename(),
-            path_str: entry.path().to_str().ok_or(Error::NonUtf8Path)?.to_string(),
-        })
+    pub fn basename_matches(&self, entry: &Entry) -> Result<Vec<Range<usize>>> {
+        if self.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let basename = entry.basename();
+
+        if self.match_path {
+            let path = entry.path();
+            let path_str = path.to_str().ok_or(Error::NonUtf8Path)?;
+
+            Ok(self
+                .regex
+                .find_iter(path_str)
+                .filter(|m| path_str.len() - m.end() < basename.len())
+                .map(|m| Range {
+                    start: basename.len().saturating_sub(path_str.len() - m.start()),
+                    end: basename.len() - (path_str.len() - m.end()),
+                })
+                .collect())
+        } else {
+            Ok(self.regex.find_iter(basename).map(|m| m.range()).collect())
+        }
+    }
+
+    pub fn path_matches(&self, entry: &Entry) -> Result<Vec<Range<usize>>> {
+        if self.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let path = entry.path();
+        let path_str = path.to_str().ok_or(Error::NonUtf8Path)?;
+
+        if self.match_path {
+            Ok(self.regex.find_iter(path_str).map(|m| m.range()).collect())
+        } else {
+            let basename = entry.basename();
+
+            Ok(self
+                .regex
+                .find_iter(basename)
+                .map(|m| Range {
+                    start: path_str.len() - basename.len() + m.start(),
+                    end: path_str.len() - basename.len() + m.end(),
+                })
+                .collect())
+        }
     }
 }
 
@@ -191,69 +231,6 @@ impl<'a> QueryBuilder<'a> {
     }
 }
 
-pub struct MatchDetail<'a, 'b> {
-    query: &'a Query,
-    basename: &'b str,
-    path_str: String,
-}
-
-impl MatchDetail<'_, '_> {
-    pub fn path_str(&self) -> &str {
-        &self.path_str
-    }
-
-    pub fn basename_matches(&self) -> Vec<Range<usize>> {
-        if self.query.is_empty() {
-            Vec::new()
-        } else if self.query.match_path() {
-            self.query
-                .regex()
-                .find_iter(&self.path_str)
-                .filter_map(|m| {
-                    if self.path_str.len() - m.end() < self.basename.len() {
-                        Some(Range {
-                            start: self
-                                .basename
-                                .len()
-                                .saturating_sub(self.path_str.len() - m.start()),
-                            end: self.basename.len() - (self.path_str.len() - m.end()),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        } else {
-            self.query
-                .regex()
-                .find_iter(self.basename)
-                .map(|m| m.range())
-                .collect()
-        }
-    }
-
-    pub fn path_matches(&self) -> Vec<Range<usize>> {
-        if self.query.is_empty() {
-            Vec::new()
-        } else if self.query.match_path() {
-            self.query
-                .regex()
-                .find_iter(&self.path_str)
-                .map(|m| m.range())
-                .collect()
-        } else {
-            self.query
-                .regex()
-                .find_iter(self.basename)
-                .map(|m| Range {
-                    start: self.path_str.len() - self.basename.len() + m.start(),
-                    end: self.path_str.len() - self.basename.len() + m.end(),
-                })
-                .collect()
-        }
-    }
-}
-
 fn pattern_has_path_separator(pattern: &str, is_regex_enabled: bool) -> bool {
     if is_regex_enabled {
         regex_helper::pattern_has_path_separator(pattern)
@@ -291,6 +268,9 @@ fn should_be_case_sensitive(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::*;
+    use std::{fs, path::Path};
+    use tempfile::TempDir;
 
     #[test]
     fn match_path() {
@@ -396,40 +376,104 @@ mod tests {
         ));
     }
 
+    fn create_dir_structure<P>(dirs: &[P]) -> TempDir
+    where
+        P: AsRef<Path>,
+    {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let path = tmpdir.path();
+
+        for dir in dirs {
+            fs::create_dir_all(path.join(dir)).unwrap();
+        }
+
+        tmpdir
+    }
+
     #[test]
-    fn match_detail() {
-        let query = QueryBuilder::new("bar").build().unwrap();
-        let match_detail = MatchDetail {
-            query: &query,
-            basename: "barbaz",
-            path_str: "aaa/foobarbaz/barbaz".to_string(),
+    fn match_ranges() {
+        let tmpdir = create_dir_structure(&[
+            Path::new("aaa/foobarbaz/barbaz"),
+            Path::new("0042bar/a/foo123bar"),
+        ]);
+        let path = dunce::canonicalize(tmpdir.path()).unwrap();
+        let prefix = path.to_str().unwrap();
+        let prefix_len = if prefix.ends_with(std::path::MAIN_SEPARATOR) {
+            prefix.len()
+        } else {
+            prefix.len() + 1
         };
-        assert_eq!(match_detail.basename_matches(), vec![0..3]);
-        assert_eq!(match_detail.path_matches(), vec![14..17]);
+
+        let database = DatabaseBuilder::new()
+            .add_dir(tmpdir.path())
+            .build()
+            .unwrap();
+
+        let search = |query| {
+            database
+                .search(query)
+                .unwrap()
+                .into_iter()
+                .map(|id| database.entry(id))
+                .collect::<Vec<_>>()
+        };
+
+        let query = QueryBuilder::new("bar").build().unwrap();
+        let entries = search(&query);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.basename())
+                .collect::<Vec<_>>(),
+            vec!["0042bar", "barbaz", "foo123bar", "foobarbaz"]
+        );
+        let entry = &entries[1];
+        assert_eq!(query.basename_matches(&entry).unwrap(), vec![0..3]);
+        assert_eq!(
+            query.path_matches(&entry).unwrap(),
+            vec![prefix_len + 14..prefix_len + 17]
+        );
 
         let query = QueryBuilder::new("bar")
             .match_path_mode(MatchPathMode::Always)
             .build()
             .unwrap();
-        let match_detail = MatchDetail {
-            query: &query,
-            basename: "barbaz",
-            path_str: "aaa/foobarbaz/barbaz".to_string(),
-        };
-        assert_eq!(match_detail.basename_matches(), vec![0..3]);
-        assert_eq!(match_detail.path_matches(), vec![7..10, 14..17]);
+        let entry = search(&query)
+            .into_iter()
+            .find(|entry| entry.basename() == "barbaz")
+            .unwrap();
+        assert_eq!(query.basename_matches(&entry).unwrap(), vec![0..3]);
+        assert_eq!(
+            query
+                .path_matches(&entry)
+                .unwrap()
+                .into_iter()
+                .filter(|range| { prefix_len <= range.start })
+                .collect::<Vec<_>>(),
+            vec![
+                prefix_len + 7..prefix_len + 10,
+                prefix_len + 14..prefix_len + 17
+            ]
+        );
 
         let query = QueryBuilder::new("[0-9]+")
             .match_path_mode(MatchPathMode::Always)
             .regex(true)
             .build()
             .unwrap();
-        let match_detail = MatchDetail {
-            query: &query,
-            basename: "foo123bar",
-            path_str: "0042bar/a/foo123bar".to_string(),
-        };
-        assert_eq!(match_detail.basename_matches(), vec![3..6]);
-        assert_eq!(match_detail.path_matches(), vec![0..4, 13..16]);
+        let entry = search(&query)
+            .into_iter()
+            .find(|entry| entry.basename() == "foo123bar")
+            .unwrap();
+        assert_eq!(query.basename_matches(&entry).unwrap(), vec![3..6]);
+        assert_eq!(
+            query
+                .path_matches(&entry)
+                .unwrap()
+                .into_iter()
+                .filter(|range| { prefix_len <= range.start })
+                .collect::<Vec<_>>(),
+            vec![prefix_len..prefix_len + 4, prefix_len + 13..prefix_len + 16]
+        );
     }
 }

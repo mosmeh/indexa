@@ -7,7 +7,7 @@ use super::{
 use indexa::{
     database::{Entry, EntryId, StatusKind},
     mode::Mode,
-    query::{MatchDetail, SortOrder},
+    query::{Query, SortOrder},
 };
 
 use chrono::{offset::Local, DateTime};
@@ -84,10 +84,11 @@ impl<'a> TuiApp<'a> {
         #[allow(clippy::needless_collect)] // false positive
         let display_func = |id: &EntryId| {
             let entry = self.database.as_ref().unwrap().entry(*id);
-            let match_detail = self.query.as_ref().unwrap().match_detail(&entry).unwrap();
             let contents = columns
                 .iter()
-                .map(|column| self.format_column_content(&column.status, &entry, &match_detail))
+                .map(|column| {
+                    self.format_column_content(&column.status, &entry, self.query.as_ref().unwrap())
+                })
                 .collect::<Vec<_>>();
             Row::new(contents.into_iter())
         };
@@ -204,17 +205,26 @@ impl<'a> TuiApp<'a> {
         &self,
         kind: &StatusKind,
         entry: &Entry,
-        match_detail: &MatchDetail,
+        query: &Query,
     ) -> HighlightableText<impl Iterator<Item = Range<usize>>> {
         match kind {
-            StatusKind::Basename => HighlightableText::Highlighted(
-                entry.basename().to_string(),
-                match_detail.basename_matches().into_iter(),
-            ),
-            StatusKind::Path => HighlightableText::Highlighted(
-                match_detail.path_str().to_string(),
-                match_detail.path_matches().into_iter(),
-            ),
+            StatusKind::Basename => query
+                .basename_matches(entry)
+                .map(|matches| {
+                    HighlightableText::Highlighted(
+                        entry.basename().to_string(),
+                        matches.into_iter(),
+                    )
+                })
+                .unwrap_or_default(),
+            StatusKind::Path => entry
+                .path()
+                .to_str()
+                .zip(query.path_matches(entry).ok())
+                .map(|(path_str, matches)| {
+                    HighlightableText::Highlighted(path_str.to_string(), matches.into_iter())
+                })
+                .unwrap_or_default(),
             StatusKind::Extension => entry
                 .extension()
                 .map(|s| s.to_string().into())
