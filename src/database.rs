@@ -37,6 +37,11 @@ impl Database {
     }
 
     #[inline]
+    pub fn entries(&self) -> impl ExactSizeIterator<Item = Entry<'_>> {
+        (0..self.nodes.len() as u32).map(move |id| self.entry(EntryId(id)))
+    }
+
+    #[inline]
     pub fn root_entries(&self) -> impl ExactSizeIterator<Item = Entry<'_>> {
         self.root_paths
             .keys()
