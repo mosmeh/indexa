@@ -44,7 +44,7 @@ impl<'d, 'a, 'r> FilterContext<'d, 'a, 'r> {
             database,
             abort_signal,
             regex,
-            regex_tls: ThreadLocal::new(),
+            regex_tls: ThreadLocal::with_capacity(rayon::current_num_threads() + 1),
         }
     }
 
