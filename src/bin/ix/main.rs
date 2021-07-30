@@ -113,11 +113,13 @@ fn main() -> Result<()> {
     if opt.update {
         create_database(db_location, &config)?;
         return Ok(());
-    } else if !db_location.exists() {
+    }
+
+    if !db_location.exists() {
         let yes = Confirm::new()
             .with_prompt("Database is not created yet. Create it now?")
-            .interact_on(&dialoguer::console::Term::stderr())
-            .unwrap_or(false);
+            .default(true)
+            .interact()?;
         if yes {
             create_database(db_location, &config)?;
         } else {
