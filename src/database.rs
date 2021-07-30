@@ -186,13 +186,14 @@ pub enum StatusKind {
 
 type StatusFlags = EnumMap<StatusKind, bool>;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct EntryId(u32);
 
 /// A convenience struct which acts as if it holds data of the entry.
 ///
 /// If a requested status is indexed, Entry grabs it from database.
 /// Otherwise the status is fetched from file systems.
+#[derive(Debug, Clone)]
 pub struct Entry<'a> {
     database: &'a Database,
     id: EntryId,
