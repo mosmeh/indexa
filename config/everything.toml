@@ -1,3 +1,5 @@
+# A config imitating the default options of Everything (https://www.voidtools.com/)
+
 [flags]
 ignore_case = true
 match_path = "auto"
