@@ -2,17 +2,16 @@ mod config;
 mod tui;
 mod worker;
 
-use crate::config::Config;
-
+use crate::config::DatabaseConfig;
 use indexa::{database::DatabaseBuilder, query::MatchPathMode};
 
 use anyhow::{anyhow, Error, Result};
 use dialoguer::Confirm;
 use rayon::ThreadPoolBuilder;
 use std::{
-    fs::{self, File},
+    fs::File,
     io::{BufWriter, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
 };
 use structopt::{clap::AppSettings, StructOpt};
@@ -111,7 +110,7 @@ fn main() -> Result<()> {
         .build_global()?;
 
     if opt.update {
-        create_database(db_location, &config)?;
+        create_database(&config.database)?;
         return Ok(());
     }
 
@@ -121,7 +120,7 @@ fn main() -> Result<()> {
             .default(true)
             .interact()?;
         if yes {
-            create_database(db_location, &config)?;
+            create_database(&config.database)?;
         } else {
             return Ok(());
         }
@@ -132,39 +131,40 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn create_database<P: AsRef<Path>>(path: P, config: &Config) -> Result<()> {
-    let create = !path.as_ref().exists();
-    if create {
-        eprintln!("Creating a database");
-    } else {
-        eprintln!("Updating the database");
-    }
-
+fn create_database(db_config: &DatabaseConfig) -> Result<()> {
     let mut builder = DatabaseBuilder::new();
-    for dir in &config.database.dirs {
+    builder.ignore_hidden(db_config.ignore_hidden);
+    for dir in &db_config.dirs {
         builder.add_dir(&dir);
     }
-    for kind in &config.database.index {
+    for kind in &db_config.index {
         builder.index(*kind);
     }
-    for kind in &config.database.fast_sort {
+    for kind in &db_config.fast_sort {
         builder.fast_sort(*kind);
     }
 
-    let database = builder
-        .ignore_hidden(config.database.ignore_hidden)
-        .build()?;
+    eprintln!("Indexing");
+    let database = builder.build()?;
+    eprintln!("Indexed {} files/directories", database.num_entries());
 
-    if let Some(parent) = path.as_ref().parent() {
-        fs::create_dir_all(parent)?;
+    eprintln!("Writing");
+
+    let location = db_config.location.as_ref().unwrap();
+    let create = !location.exists();
+
+    if let Some(parent) = location.parent() {
+        std::fs::create_dir_all(parent)?;
     }
 
-    let mut writer = BufWriter::new(File::create(&path)?);
+    let mut writer = BufWriter::new(File::create(&location)?);
     bincode::serialize_into(&mut writer, &database)?;
     writer.flush()?;
 
     if create {
-        eprintln!("Created a database at {}", path.as_ref().display());
+        eprintln!("Created a database at {}", location.display());
+    } else {
+        eprintln!("Updated the database");
     }
 
     Ok(())
