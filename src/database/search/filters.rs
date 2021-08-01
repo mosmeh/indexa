@@ -65,49 +65,33 @@ pub(crate) trait Filter {
 }
 
 pub(crate) trait MatchEntries: Filter {
-    fn match_entries(ctx: &FilterContext, matched: &[AtomicBool]) -> Result<()>;
+    fn match_entries(ctx: &FilterContext, matched: &mut [AtomicBool]) -> Result<()>;
 }
 
 impl<T: MatchEntries> Filter for T {
     fn ordered(ctx: &FilterContext, ids: impl ParallelIterator<Item = u32>) -> Result<Vec<u32>> {
         let nodes = &ctx.database.nodes;
-        let mut matched = Vec::with_capacity(nodes.len());
-        for _ in 0..nodes.len() {
-            matched.push(AtomicBool::new(false));
-        }
+        let mut matched: Vec<_> = (0..nodes.len()).map(|_| AtomicBool::new(false)).collect();
 
-        Self::match_entries(ctx, &matched)?;
+        Self::match_entries(ctx, &mut matched)?;
 
-        ids.filter_map(|id| {
-            if ctx.abort_signal.load(Ordering::Relaxed) {
-                return Some(Err(Error::SearchAbort));
-            }
-
-            matched[id as usize].load(Ordering::Relaxed).then(|| Ok(id))
-        })
-        .collect()
+        let matched: Vec<_> = matched.into_iter().map(AtomicBool::into_inner).collect();
+        let hits = ids.filter(|id| matched[*id as usize]).collect();
+        Ok(hits)
     }
 
     fn unordered(ctx: &FilterContext) -> Result<Vec<u32>> {
         let nodes = &ctx.database.nodes;
-        let mut matched = Vec::with_capacity(nodes.len());
-        for _ in 0..nodes.len() {
-            matched.push(AtomicBool::new(false));
-        }
+        let mut matched: Vec<_> = (0..nodes.len()).map(|_| AtomicBool::new(false)).collect();
 
-        Self::match_entries(ctx, &matched)?;
+        Self::match_entries(ctx, &mut matched)?;
 
-        (0..ctx.database.num_entries() as u32)
-            .into_par_iter()
-            .zip(matched.into_par_iter())
-            .filter_map(|(id, m)| {
-                if ctx.abort_signal.load(Ordering::Relaxed) {
-                    return Some(Err(Error::SearchAbort));
-                }
-
-                m.load(Ordering::Relaxed).then(|| Ok(id))
-            })
-            .collect()
+        let hits = (0..ctx.database.num_entries() as u32)
+            .into_iter()
+            .zip(matched.into_iter())
+            .filter_map(|(id, m)| m.into_inner().then(|| id))
+            .collect();
+        Ok(hits)
     }
 }
 

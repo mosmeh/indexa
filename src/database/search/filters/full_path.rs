@@ -10,7 +10,7 @@ use std::{
 pub struct FullPathFilter;
 
 impl MatchEntries for FullPathFilter {
-    fn match_entries(ctx: &FilterContext, matched: &[AtomicBool]) -> Result<()> {
+    fn match_entries(ctx: &FilterContext, matched: &mut [AtomicBool]) -> Result<()> {
         let nodes = &ctx.database.nodes;
         let root_paths = &ctx.database.root_paths;
 
@@ -21,16 +21,13 @@ impl MatchEntries for FullPathFilter {
                 .copied()
                 .chain(std::iter::once(nodes.len() as u32)),
         ) {
-            if ctx.regex.is_match(root_path.to_str().unwrap()) {
-                matched[*root_id as usize..next_root_id as usize]
-                    .into_par_iter()
-                    .try_for_each(|m| {
-                        if ctx.abort_signal.load(Ordering::Relaxed) {
-                            return Err(Error::SearchAbort);
-                        }
-                        m.store(true, Ordering::Relaxed);
-                        Ok(())
-                    })?;
+            if ctx
+                .regex
+                .is_match(root_path.to_str().ok_or(Error::NonUtf8Path)?)
+            {
+                for m in &mut matched[*root_id as usize..next_root_id as usize] {
+                    *m.get_mut() = true;
+                }
             } else {
                 let root_node = &nodes[*root_id as usize];
                 traverse_tree(ctx, matched, root_node, root_path)?;

@@ -10,12 +10,15 @@ use std::{
 pub struct RegexPathFilter;
 
 impl MatchEntries for RegexPathFilter {
-    fn match_entries(ctx: &FilterContext, matched: &[AtomicBool]) -> Result<()> {
+    fn match_entries(ctx: &FilterContext, matched: &mut [AtomicBool]) -> Result<()> {
         let nodes = &ctx.database.nodes;
 
         for (root_id, root_path) in &ctx.database.root_paths {
-            if ctx.regex.is_match(root_path.to_str().unwrap()) {
-                matched[*root_id as usize].store(true, Ordering::Relaxed);
+            if ctx
+                .regex
+                .is_match(root_path.to_str().ok_or(Error::NonUtf8Path)?)
+            {
+                *matched[*root_id as usize].get_mut() = true;
             }
 
             let root_node = &nodes[*root_id as usize];
