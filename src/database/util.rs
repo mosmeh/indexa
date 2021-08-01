@@ -38,13 +38,13 @@ pub fn get_basename(path: &Path) -> &std::ffi::OsStr {
 pub fn get_compare_func(kind: StatusKind) -> fn(&Entry, &Entry) -> Ordering {
     #[inline]
     fn cmp_by_basename(a: &Entry, b: &Entry) -> Ordering {
-        Ord::cmp(a.basename(), b.basename())
+        Ord::cmp(a.basename(), b.basename()).then_with(|| Entry::cmp_by_path(a, b))
     }
     fn cmp_by_path(a: &Entry, b: &Entry) -> Ordering {
         Entry::cmp_by_path(a, b)
     }
     fn cmp_by_extension(a: &Entry, b: &Entry) -> Ordering {
-        Entry::cmp_by_extension(a, b)
+        Entry::cmp_by_extension(a, b).then_with(|| cmp_by_basename(a, b))
     }
     fn cmp_by_size(a: &Entry, b: &Entry) -> Ordering {
         Ord::cmp(&a.size().ok(), &b.size().ok()).then_with(|| cmp_by_basename(a, b))
