@@ -1,6 +1,7 @@
 use indexa::{
     database::{Database, EntryId},
     query::Query,
+    Error,
 };
 
 use anyhow::{Context, Result};
@@ -108,10 +109,14 @@ impl SearcherImpl {
 
                     thread::spawn(move || {
                         let hits = database.abortable_search(&query, &abort_signal);
-                        if let Ok(hits) = hits {
-                            if !abort_signal.load(atomic::Ordering::Relaxed) {
-                                let _ = tx_clone.send(hits);
+                        match hits {
+                            Ok(hits) => {
+                                if !abort_signal.load(atomic::Ordering::Relaxed) {
+                                    let _ = tx_clone.send(hits);
+                                }
                             }
+                            Err(Error::SearchAbort) => (),
+                            Err(e) => panic!("{}", e),
                         }
                     });
 
