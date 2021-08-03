@@ -151,13 +151,7 @@ impl<'a> TuiApp<'a> {
         if let Some(id) = self.hits.get(self.table_state.selected()) {
             println!(
                 "{}",
-                self.database
-                    .as_ref()
-                    .unwrap()
-                    .entry(*id)
-                    .path()
-                    .to_str()
-                    .unwrap()
+                self.database.as_ref().unwrap().entry(*id).path().display()
             );
         }
         Ok(())
