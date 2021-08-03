@@ -3,12 +3,15 @@ mod filters;
 use super::{util, Database, EntryId};
 use crate::{
     query::{Query, SortOrder},
-    Result,
+    Error, Result,
 };
 use filters::{Filter, FilterContext};
 
 use rayon::prelude::*;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 impl Database {
     pub fn search(&self, query: &Query) -> Result<Vec<EntryId>> {
@@ -51,6 +54,10 @@ impl Database {
         } else {
             let mut hits = F::unordered(&ctx)?;
 
+            if abort_signal.load(Ordering::Relaxed) {
+                return Err(Error::SearchAbort);
+            }
+
             let compare_func = util::get_compare_func(query.sort_by());
             let slice = hits.as_parallel_slice_mut();
             match query.sort_order() {
@@ -66,6 +73,10 @@ impl Database {
         };
 
         if query.sort_dirs_before_files() {
+            if abort_signal.load(Ordering::Relaxed) {
+                return Err(Error::SearchAbort);
+            }
+
             let slice = hits.as_parallel_slice_mut();
             match query.sort_order() {
                 SortOrder::Ascending => slice.par_sort_by(|a, b| {
