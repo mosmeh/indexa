@@ -428,9 +428,9 @@ mod tests {
             vec!["0042bar", "barbaz", "foo123bar", "foobarbaz"]
         );
         let entry = &entries[1];
-        assert_eq!(query.basename_matches(&entry).unwrap(), vec![0..3]);
+        assert_eq!(query.basename_matches(entry).unwrap(), vec![0..3]);
         assert_eq!(
-            query.path_matches(&entry).unwrap(),
+            query.path_matches(entry).unwrap(),
             vec![prefix_len + 14..prefix_len + 17]
         );
 
