@@ -8,23 +8,20 @@ use backend::CustomBackend;
 use table::TableState;
 use text_box::TextBoxState;
 
-use crate::{
-    config::Config,
-    worker::{Loader, Searcher},
-};
+use crate::{config::Config, searcher::Searcher};
 
 use indexa::{
     database::{Database, EntryId},
     query::Query,
 };
 
-use anyhow::Result;
-use crossbeam_channel::Sender;
+use anyhow::{Context, Result};
+use bincode::Options;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture},
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use std::{io, sync::Arc, thread};
+use std::{io, path::Path, sync::Arc, thread};
 use tui::Terminal;
 
 pub fn run(config: &Config) -> Result<()> {
@@ -46,9 +43,9 @@ struct TuiApp<'a> {
     config: &'a Config,
     status: State,
     database: Option<Arc<Database>>,
+    searcher: Option<Searcher>,
     query: Option<Query>,
     hits: Vec<EntryId>,
-    query_tx: Option<Sender<Query>>,
     text_box_state: TextBoxState,
     table_state: TableState,
     page_scroll_amount: u16,
@@ -60,9 +57,9 @@ impl<'a> TuiApp<'a> {
             config,
             status: State::Loading,
             database: None,
+            searcher: None,
             query: None,
             hits: Vec::new(),
-            query_tx: None,
             text_box_state: TextBoxState::with_text(
                 config.flags.query.clone().unwrap_or_else(|| "".to_string()),
             ),
@@ -76,7 +73,10 @@ impl<'a> TuiApp<'a> {
     fn run(&mut self) -> Result<()> {
         let (load_tx, load_rx) = crossbeam_channel::bounded(1);
         let db_path = self.config.database.location.as_ref().unwrap().clone();
-        let _loader = Loader::run(db_path, load_tx)?;
+
+        thread::spawn(move || {
+            load_tx.send(load_database(db_path)).unwrap();
+        });
 
         let mut terminal = setup_terminal()?;
 
@@ -112,11 +112,9 @@ impl<'a> TuiApp<'a> {
             let database = Arc::new(database);
             self.database = Some(Arc::clone(&database));
 
-            let (query_tx, query_rx) = crossbeam_channel::unbounded();
             let (result_tx, result_rx) = crossbeam_channel::bounded(1);
-            let _searcher = Searcher::run(database, query_rx, result_tx)?;
+            self.searcher = Some(Searcher::new(database, result_tx));
 
-            self.query_tx = Some(query_tx);
             self.handle_query_change()?;
 
             loop {
@@ -168,4 +166,15 @@ fn cleanup_terminal(terminal: &mut Terminal<Backend>) -> Result<()> {
         DisableMouseCapture
     )?;
     Ok(())
+}
+
+fn load_database<P>(path: P) -> Result<Database>
+where
+    P: AsRef<Path>,
+{
+    bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .reject_trailing_bytes()
+        .deserialize(&std::fs::read(path)?)
+        .context("Failed to load database. Try updating the database")
 }

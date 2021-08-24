@@ -176,7 +176,7 @@ impl<'a> TuiApp<'a> {
             Ok(query) => {
                 self.query = Some(query.clone());
                 self.status = State::Searching;
-                self.query_tx.as_ref().unwrap().send(query)?;
+                self.searcher.as_mut().unwrap().search(query);
             }
             Err(err) => {
                 let err_str = err.to_string();

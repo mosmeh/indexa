@@ -1,6 +1,6 @@
 mod config;
+mod searcher;
 mod tui;
-mod worker;
 
 use crate::config::DatabaseConfig;
 use indexa::{database::DatabaseBuilder, query::MatchPathMode};
