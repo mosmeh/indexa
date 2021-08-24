@@ -30,7 +30,7 @@ impl Database {
         if !query.match_path() {
             return self.filter_and_sort::<filters::BasenameFilter>(query, abort_signal);
         }
-        if query.is_regex_enabled() {
+        if !query.is_literal() {
             return self.filter_and_sort::<filters::RegexPathFilter>(query, abort_signal);
         }
         if !query.has_path_separator() {

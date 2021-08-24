@@ -5,10 +5,15 @@ use regex_syntax::{
     ParserBuilder,
 };
 
-pub fn pattern_has_path_separator(pattern: &str) -> bool {
-    let mut parser = ParserBuilder::new().allow_invalid_utf8(true).build();
-    parser
+fn parse_pattern(pattern: &str) -> regex_syntax::Result<Hir> {
+    ParserBuilder::new()
+        .allow_invalid_utf8(true)
+        .build()
         .parse(pattern)
+}
+
+pub fn pattern_has_path_separator(pattern: &str) -> bool {
+    parse_pattern(pattern)
         .map(|hir| hir_has_path_separator(&hir))
         .unwrap_or(false)
 }
@@ -36,9 +41,7 @@ fn hir_has_path_separator(hir: &Hir) -> bool {
 }
 
 pub fn pattern_has_uppercase_char(pattern: &str) -> bool {
-    let mut parser = ParserBuilder::new().allow_invalid_utf8(true).build();
-    parser
-        .parse(pattern)
+    parse_pattern(pattern)
         .map(|hir| hir_has_uppercase_char(&hir))
         .unwrap_or(false)
 }
@@ -61,4 +64,10 @@ fn hir_has_uppercase_char(hir: &Hir) -> bool {
         }
         _ => false,
     }
+}
+
+pub fn pattern_is_literal(pattern: &str) -> bool {
+    parse_pattern(pattern)
+        .map(|hir| hir.is_literal())
+        .unwrap_or(false)
 }

@@ -12,10 +12,10 @@ use std::{borrow::Cow, ops::Range};
 pub struct Query {
     regex: Regex,
     match_path: bool,
-    is_regex_enabled: bool,
     sort_by: StatusKind,
     sort_order: SortOrder,
     sort_dirs_before_files: bool,
+    is_literal: bool,
     has_path_separator: bool,
 }
 
@@ -28,11 +28,6 @@ impl Query {
     #[inline]
     pub fn match_path(&self) -> bool {
         self.match_path
-    }
-
-    #[inline]
-    pub fn is_regex_enabled(&self) -> bool {
-        self.is_regex_enabled
     }
 
     #[inline]
@@ -53,11 +48,6 @@ impl Query {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.regex.as_str().is_empty()
-    }
-
-    #[inline]
-    pub fn has_path_separator(&self) -> bool {
-        self.has_path_separator
     }
 
     #[inline]
@@ -120,6 +110,16 @@ impl Query {
                 })
                 .collect())
         }
+    }
+
+    #[inline]
+    pub(crate) fn is_literal(&self) -> bool {
+        self.is_literal
+    }
+
+    #[inline]
+    pub(crate) fn has_path_separator(&self) -> bool {
+        self.has_path_separator
     }
 }
 
@@ -206,8 +206,8 @@ impl<'a> QueryBuilder<'a> {
     }
 
     pub fn build(&self) -> Result<Query> {
-        let case_sensitive =
-            should_be_case_sensitive(self.case_sensitivity, self.is_regex_enabled, &self.pattern);
+        let has_uppercase_char = pattern_has_uppercase_char(&self.pattern, self.is_regex_enabled);
+        let case_sensitive = should_be_case_sensitive(self.case_sensitivity, has_uppercase_char);
 
         let regex = if self.is_regex_enabled {
             RegexBuilder::new(&self.pattern)
@@ -217,15 +217,17 @@ impl<'a> QueryBuilder<'a> {
         .case_insensitive(!case_sensitive)
         .build()?;
 
+        let is_literal = pattern_is_literal(&self.pattern, self.is_regex_enabled);
         let has_path_separator = pattern_has_path_separator(&self.pattern, self.is_regex_enabled);
+        let match_path = should_match_path(self.match_path_mode, has_path_separator);
 
         Ok(Query {
             regex,
-            match_path: should_match_path(self.match_path_mode, has_path_separator),
-            is_regex_enabled: self.is_regex_enabled,
+            match_path,
             sort_by: self.sort_by,
             sort_order: self.sort_order,
             sort_dirs_before_files: self.sort_dirs_before_files,
+            is_literal,
             has_path_separator,
         })
     }
@@ -247,21 +249,27 @@ fn should_match_path(match_path_mode: MatchPathMode, has_path_separator: bool) -
     }
 }
 
-fn should_be_case_sensitive(
-    case_sensitivity: CaseSensitivity,
-    is_regex_enabled: bool,
-    pattern: &str,
-) -> bool {
+fn pattern_has_uppercase_char(pattern: &str, is_regex_enabled: bool) -> bool {
+    if is_regex_enabled {
+        regex_helper::pattern_has_uppercase_char(pattern)
+    } else {
+        pattern.chars().any(|c| c.is_uppercase())
+    }
+}
+
+fn should_be_case_sensitive(case_sensitivity: CaseSensitivity, has_uppercase_char: bool) -> bool {
     match case_sensitivity {
         CaseSensitivity::Sensitive => true,
         CaseSensitivity::Insensitive => false,
-        CaseSensitivity::Smart => {
-            if is_regex_enabled {
-                regex_helper::pattern_has_uppercase_char(pattern)
-            } else {
-                pattern.chars().any(|c| c.is_uppercase())
-            }
-        }
+        CaseSensitivity::Smart => has_uppercase_char,
+    }
+}
+
+fn pattern_is_literal(pattern: &str, is_regex_enabled: bool) -> bool {
+    if is_regex_enabled {
+        regex_helper::pattern_is_literal(pattern)
+    } else {
+        true
     }
 }
 
@@ -339,41 +347,42 @@ mod tests {
 
     #[test]
     fn case_sensitive() {
-        assert!(should_be_case_sensitive(
-            CaseSensitivity::Sensitive,
-            false,
-            "foo"
-        ));
+        fn is_case_sensitive(
+            case_sensitivity: CaseSensitivity,
+            is_regex_enabled: bool,
+            pattern: &str,
+        ) -> bool {
+            let has_uppercase_char = pattern_has_uppercase_char(pattern, is_regex_enabled);
+            should_be_case_sensitive(case_sensitivity, has_uppercase_char)
+        }
 
-        assert!(!should_be_case_sensitive(
+        assert!(is_case_sensitive(CaseSensitivity::Sensitive, false, "foo"));
+        assert!(!is_case_sensitive(
             CaseSensitivity::Insensitive,
             false,
             "foo"
         ));
+        assert!(is_case_sensitive(CaseSensitivity::Smart, false, "Foo"));
+        assert!(!is_case_sensitive(CaseSensitivity::Smart, false, "foo"));
+        assert!(is_case_sensitive(CaseSensitivity::Smart, true, "[A-Z]x"));
+        assert!(!is_case_sensitive(CaseSensitivity::Smart, true, "[a-z]x"));
+    }
 
-        assert!(should_be_case_sensitive(
-            CaseSensitivity::Smart,
-            false,
-            "Foo"
-        ));
+    #[test]
+    fn literal() {
+        assert!(pattern_is_literal("a", false));
+        assert!(pattern_is_literal("a.b", false));
+        assert!(pattern_is_literal(r#"a\.b"#, false));
+        assert!(pattern_is_literal("a(b)", false));
+        assert!(pattern_is_literal(r#"a\"#, false));
+        assert!(pattern_is_literal(r#"a\\"#, false));
 
-        assert!(!should_be_case_sensitive(
-            CaseSensitivity::Smart,
-            false,
-            "foo"
-        ));
-
-        assert!(should_be_case_sensitive(
-            CaseSensitivity::Smart,
-            true,
-            "[A-Z]x"
-        ));
-
-        assert!(!should_be_case_sensitive(
-            CaseSensitivity::Smart,
-            true,
-            "[a-z]x"
-        ));
+        assert!(pattern_is_literal("a", true));
+        assert!(!pattern_is_literal("a.b", true));
+        assert!(pattern_is_literal(r#"a\.b"#, true));
+        assert!(!pattern_is_literal("a(b)", true));
+        assert!(!pattern_is_literal(r#"a\"#, true));
+        assert!(pattern_is_literal(r#"a\\"#, true));
     }
 
     fn create_dir_structure<P>(dirs: &[P]) -> TempDir
