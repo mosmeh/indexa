@@ -6,7 +6,9 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
-    RegexBuild(#[from] regex::Error),
+    Regex(#[from] regex::Error),
+    #[error(transparent)]
+    RegexSyntax(#[from] regex_syntax::Error),
     #[error("{0}")]
     InvalidOption(String),
     #[error("Encountered non-UTF-8 path")]

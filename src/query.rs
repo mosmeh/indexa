@@ -160,12 +160,12 @@ pub struct QueryBuilder<'a> {
 }
 
 impl<'a> QueryBuilder<'a> {
-    pub fn new<P>(query_str: P) -> Self
+    pub fn new<P>(pattern: P) -> Self
     where
         P: Into<Cow<'a, str>>,
     {
         Self {
-            pattern: query_str.into(),
+            pattern: pattern.into(),
             match_path_mode: MatchPathMode::Never,
             case_sensitivity: CaseSensitivity::Smart,
             is_regex_enabled: false,
@@ -206,19 +206,25 @@ impl<'a> QueryBuilder<'a> {
     }
 
     pub fn build(&self) -> Result<Query> {
-        let has_uppercase_char = pattern_has_uppercase_char(&self.pattern, self.is_regex_enabled);
+        let escaped_pattern = if self.is_regex_enabled {
+            self.pattern.clone()
+        } else {
+            regex::escape(&self.pattern).into()
+        };
+
+        let mut parser = regex_syntax::ParserBuilder::new()
+            .allow_invalid_utf8(true)
+            .build();
+        let hir = parser.parse(&escaped_pattern)?;
+
+        let has_uppercase_char = regex_helper::hir_has_uppercase_char(&hir);
         let case_sensitive = should_be_case_sensitive(self.case_sensitivity, has_uppercase_char);
 
-        let regex = if self.is_regex_enabled {
-            RegexBuilder::new(&self.pattern)
-        } else {
-            RegexBuilder::new(&regex::escape(&self.pattern))
-        }
-        .case_insensitive(!case_sensitive)
-        .build()?;
+        let regex = RegexBuilder::new(&escaped_pattern)
+            .case_insensitive(!case_sensitive)
+            .build()?;
 
-        let is_literal = pattern_is_literal(&self.pattern, self.is_regex_enabled);
-        let has_path_separator = pattern_has_path_separator(&self.pattern, self.is_regex_enabled);
+        let has_path_separator = regex_helper::hir_has_path_separator(&hir);
         let match_path = should_match_path(self.match_path_mode, has_path_separator);
 
         Ok(Query {
@@ -227,17 +233,9 @@ impl<'a> QueryBuilder<'a> {
             sort_by: self.sort_by,
             sort_order: self.sort_order,
             sort_dirs_before_files: self.sort_dirs_before_files,
-            is_literal,
+            is_literal: hir.is_literal(),
             has_path_separator,
         })
-    }
-}
-
-fn pattern_has_path_separator(pattern: &str, is_regex_enabled: bool) -> bool {
-    if is_regex_enabled {
-        regex_helper::pattern_has_path_separator(pattern)
-    } else {
-        pattern.contains(std::path::MAIN_SEPARATOR)
     }
 }
 
@@ -249,14 +247,6 @@ fn should_match_path(match_path_mode: MatchPathMode, has_path_separator: bool) -
     }
 }
 
-fn pattern_has_uppercase_char(pattern: &str, is_regex_enabled: bool) -> bool {
-    if is_regex_enabled {
-        regex_helper::pattern_has_uppercase_char(pattern)
-    } else {
-        pattern.chars().any(|c| c.is_uppercase())
-    }
-}
-
 fn should_be_case_sensitive(case_sensitivity: CaseSensitivity, has_uppercase_char: bool) -> bool {
     match case_sensitivity {
         CaseSensitivity::Sensitive => true,
@@ -265,20 +255,25 @@ fn should_be_case_sensitive(case_sensitivity: CaseSensitivity, has_uppercase_cha
     }
 }
 
-fn pattern_is_literal(pattern: &str, is_regex_enabled: bool) -> bool {
-    if is_regex_enabled {
-        regex_helper::pattern_is_literal(pattern)
-    } else {
-        true
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::database::*;
+    use regex_syntax::hir::Hir;
     use std::{fs, path::Path};
     use tempfile::TempDir;
+
+    fn parse_pattern(pattern: &str, is_regex_enabled: bool) -> Hir {
+        let mut parser = regex_syntax::ParserBuilder::new()
+            .allow_invalid_utf8(true)
+            .build();
+        let escaped_pattern = if is_regex_enabled {
+            pattern.to_owned()
+        } else {
+            regex::escape(pattern)
+        };
+        parser.parse(&escaped_pattern).unwrap()
+    }
 
     #[test]
     fn match_path() {
@@ -289,7 +284,8 @@ mod tests {
             is_regex_enabled: bool,
             pattern: &str,
         ) -> bool {
-            let has_path_separator = pattern_has_path_separator(pattern, is_regex_enabled);
+            let hir = parse_pattern(pattern, is_regex_enabled);
+            let has_path_separator = regex_helper::hir_has_path_separator(&hir);
             should_match_path(match_path_mode, has_path_separator)
         }
 
@@ -300,6 +296,13 @@ mod tests {
             &format!("foo{}bar", MAIN_SEPARATOR)
         ));
         assert!(!match_path(MatchPathMode::Auto, false, "foo"));
+
+        assert!(match_path(
+            MatchPathMode::Auto,
+            false,
+            &format!(r"foo{}w", MAIN_SEPARATOR)
+        ));
+        assert!(!match_path(MatchPathMode::Auto, true, r"foo\w"));
 
         if regex_syntax::is_meta_character(MAIN_SEPARATOR) {
             // typically Windows, where MAIN_SEPARATOR is \
@@ -315,11 +318,6 @@ mod tests {
                 &regex::escape(&format!(r"foo{}bar", MAIN_SEPARATOR))
             ));
             assert!(match_path(MatchPathMode::Auto, true, r"."));
-            assert!(!match_path(
-                MatchPathMode::Auto,
-                true,
-                &format!(r"foo{}", MAIN_SEPARATOR)
-            ));
             assert!(!match_path(
                 MatchPathMode::Auto,
                 true,
@@ -352,7 +350,8 @@ mod tests {
             is_regex_enabled: bool,
             pattern: &str,
         ) -> bool {
-            let has_uppercase_char = pattern_has_uppercase_char(pattern, is_regex_enabled);
+            let hir = parse_pattern(pattern, is_regex_enabled);
+            let has_uppercase_char = regex_helper::hir_has_uppercase_char(&hir);
             should_be_case_sensitive(case_sensitivity, has_uppercase_char)
         }
 
@@ -370,19 +369,23 @@ mod tests {
 
     #[test]
     fn literal() {
-        assert!(pattern_is_literal("a", false));
-        assert!(pattern_is_literal("a.b", false));
-        assert!(pattern_is_literal(r#"a\.b"#, false));
-        assert!(pattern_is_literal("a(b)", false));
-        assert!(pattern_is_literal(r#"a\"#, false));
-        assert!(pattern_is_literal(r#"a\\"#, false));
+        fn is_literal(is_regex_enabled: bool, pattern: &str) -> bool {
+            parse_pattern(pattern, is_regex_enabled).is_literal()
+        }
 
-        assert!(pattern_is_literal("a", true));
-        assert!(!pattern_is_literal("a.b", true));
-        assert!(pattern_is_literal(r#"a\.b"#, true));
-        assert!(!pattern_is_literal("a(b)", true));
-        assert!(!pattern_is_literal(r#"a\"#, true));
-        assert!(pattern_is_literal(r#"a\\"#, true));
+        assert!(is_literal(false, "a"));
+        assert!(is_literal(false, "a.b"));
+        assert!(is_literal(false, r#"a\.b"#));
+        assert!(is_literal(false, "a(b)"));
+        assert!(is_literal(false, r#"a\"#));
+        assert!(is_literal(false, r#"a\\"#));
+
+        assert!(is_literal(true, "a"));
+        assert!(!is_literal(true, "a.b"));
+        assert!(is_literal(true, r#"a\.b"#));
+        assert!(!is_literal(true, "a(b)"));
+        assert!(!is_literal(true, r#"a\w"#));
+        assert!(is_literal(true, r#"a\\"#));
     }
 
     fn create_dir_structure<P>(dirs: &[P]) -> TempDir

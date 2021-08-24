@@ -1,24 +1,8 @@
 // idea from https://github.com/sharkdp/fd/blob/6f2c8cdf914aca3ec19809d5b661f124d2935900/src/regex_helper.rs
 
-use regex_syntax::{
-    hir::{Class, Group, Hir, HirKind, Literal, Repetition},
-    ParserBuilder,
-};
+use regex_syntax::hir::{Class, Group, Hir, HirKind, Literal, Repetition};
 
-fn parse_pattern(pattern: &str) -> regex_syntax::Result<Hir> {
-    ParserBuilder::new()
-        .allow_invalid_utf8(true)
-        .build()
-        .parse(pattern)
-}
-
-pub fn pattern_has_path_separator(pattern: &str) -> bool {
-    parse_pattern(pattern)
-        .map(|hir| hir_has_path_separator(&hir))
-        .unwrap_or(false)
-}
-
-fn hir_has_path_separator(hir: &Hir) -> bool {
+pub fn hir_has_path_separator(hir: &Hir) -> bool {
     use std::path::MAIN_SEPARATOR;
 
     match hir.kind() {
@@ -40,13 +24,7 @@ fn hir_has_path_separator(hir: &Hir) -> bool {
     }
 }
 
-pub fn pattern_has_uppercase_char(pattern: &str) -> bool {
-    parse_pattern(pattern)
-        .map(|hir| hir_has_uppercase_char(&hir))
-        .unwrap_or(false)
-}
-
-fn hir_has_uppercase_char(hir: &Hir) -> bool {
+pub fn hir_has_uppercase_char(hir: &Hir) -> bool {
     match hir.kind() {
         HirKind::Literal(Literal::Unicode(c)) => c.is_uppercase(),
         HirKind::Literal(Literal::Byte(b)) => char::from(*b).is_uppercase(),
@@ -64,10 +42,4 @@ fn hir_has_uppercase_char(hir: &Hir) -> bool {
         }
         _ => false,
     }
-}
-
-pub fn pattern_is_literal(pattern: &str) -> bool {
-    parse_pattern(pattern)
-        .map(|hir| hir.is_literal())
-        .unwrap_or(false)
 }
