@@ -18,10 +18,7 @@ impl MatchEntries for ComponentWisePathFilter {
                 .copied()
                 .chain(std::iter::once(nodes.len() as u32)),
         ) {
-            if ctx
-                .regex
-                .is_match(root_path.to_str().ok_or(Error::NonUtf8Path)?)
-            {
+            if ctx.regex.is_match(root_path.as_str()) {
                 for m in &mut matched[*root_id as usize..next_root_id as usize] {
                     *m.get_mut() = true;
                 }

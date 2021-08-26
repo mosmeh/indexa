@@ -2,7 +2,7 @@ mod regex_helper;
 
 use crate::{
     database::{Entry, StatusKind},
-    Error, Result,
+    Result,
 };
 use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
@@ -53,62 +53,56 @@ impl Query {
     #[inline]
     pub fn is_match(&self, entry: &Entry) -> bool {
         if self.match_path {
-            entry
-                .path()
-                .to_str()
-                .map(|s| self.regex.is_match(s))
-                .unwrap_or(false)
+            self.regex.is_match(entry.path().as_str())
         } else {
             self.regex.is_match(entry.basename())
         }
     }
 
-    pub fn basename_matches(&self, entry: &Entry) -> Result<Vec<Range<usize>>> {
+    pub fn basename_matches(&self, entry: &Entry) -> Vec<Range<usize>> {
         if self.is_empty() {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
         let basename = entry.basename();
 
         if self.match_path {
             let path = entry.path();
-            let path_str = path.to_str().ok_or(Error::NonUtf8Path)?;
+            let path_str = path.as_str();
 
-            Ok(self
-                .regex
+            self.regex
                 .find_iter(path_str)
                 .filter(|m| path_str.len() - m.end() < basename.len())
                 .map(|m| Range {
                     start: basename.len().saturating_sub(path_str.len() - m.start()),
                     end: basename.len() - (path_str.len() - m.end()),
                 })
-                .collect())
+                .collect()
         } else {
-            Ok(self.regex.find_iter(basename).map(|m| m.range()).collect())
+            self.regex.find_iter(basename).map(|m| m.range()).collect()
         }
     }
 
-    pub fn path_matches(&self, entry: &Entry) -> Result<Vec<Range<usize>>> {
+    pub fn path_matches(&self, entry: &Entry) -> Vec<Range<usize>> {
         if self.is_empty() {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
         let path = entry.path();
-        let path_str = path.to_str().ok_or(Error::NonUtf8Path)?;
+        let path_str = path.as_str();
 
         if self.match_path {
-            Ok(self.regex.find_iter(path_str).map(|m| m.range()).collect())
+            self.regex.find_iter(path_str).map(|m| m.range()).collect()
         } else {
             let basename = entry.basename();
 
-            Ok(self
-                .regex
+            self.regex
                 .find_iter(basename)
                 .map(|m| Range {
                     start: path_str.len() - basename.len() + m.start(),
                     end: path_str.len() - basename.len() + m.end(),
                 })
-                .collect())
+                .collect()
         }
     }
 
@@ -440,9 +434,9 @@ mod tests {
             vec!["0042bar", "barbaz", "foo123bar", "foobarbaz"]
         );
         let entry = &entries[1];
-        assert_eq!(query.basename_matches(entry).unwrap(), vec![0..3]);
+        assert_eq!(query.basename_matches(entry), vec![0..3]);
         assert_eq!(
-            query.path_matches(entry).unwrap(),
+            query.path_matches(entry),
             vec![prefix_len + 14..prefix_len + 17]
         );
 
@@ -454,11 +448,10 @@ mod tests {
             .into_iter()
             .find(|entry| entry.basename() == "barbaz")
             .unwrap();
-        assert_eq!(query.basename_matches(&entry).unwrap(), vec![0..3]);
+        assert_eq!(query.basename_matches(&entry), vec![0..3]);
         assert_eq!(
             query
                 .path_matches(&entry)
-                .unwrap()
                 .into_iter()
                 .filter(|range| { prefix_len <= range.start })
                 .collect::<Vec<_>>(),
@@ -477,11 +470,10 @@ mod tests {
             .into_iter()
             .find(|entry| entry.basename() == "foo123bar")
             .unwrap();
-        assert_eq!(query.basename_matches(&entry).unwrap(), vec![3..6]);
+        assert_eq!(query.basename_matches(&entry), vec![3..6]);
         assert_eq!(
             query
                 .path_matches(&entry)
-                .unwrap()
                 .into_iter()
                 .filter(|range| { prefix_len <= range.start })
                 .collect::<Vec<_>>(),

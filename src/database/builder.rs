@@ -6,7 +6,7 @@ use crate::{Error, Result};
 
 use enum_map::{enum_map, EnumMap};
 use rayon::prelude::*;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Default)]
 pub struct DatabaseBuilder {
@@ -33,8 +33,8 @@ impl DatabaseBuilder {
         }
     }
 
-    pub fn add_dir<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
-        self.dirs.push(path.as_ref().to_path_buf());
+    pub fn add_dir<P: Into<PathBuf>>(&mut self, path: P) -> &mut Self {
+        self.dirs.push(path.into());
         self
     }
 
@@ -120,7 +120,7 @@ mod tests {
         tmpdir
     }
 
-    fn collect_paths<'a>(entries: impl Iterator<Item = Entry<'a>>) -> Vec<PathBuf> {
+    fn collect_paths<'a>(entries: impl Iterator<Item = Entry<'a>>) -> Vec<Utf8PathBuf> {
         let mut paths = Vec::new();
         for entry in entries {
             assert_eq!(entry.path().file_name().unwrap(), entry.basename());

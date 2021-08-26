@@ -1,11 +1,9 @@
 use super::{FilterContext, MatchEntries};
 use crate::{database::EntryNode, Error, Result};
 
+use camino::Utf8Path;
 use rayon::prelude::*;
-use std::{
-    path::Path,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct FullPathFilter;
 
@@ -21,10 +19,7 @@ impl MatchEntries for FullPathFilter {
                 .copied()
                 .chain(std::iter::once(nodes.len() as u32)),
         ) {
-            if ctx
-                .regex
-                .is_match(root_path.to_str().ok_or(Error::NonUtf8Path)?)
-            {
+            if ctx.regex.is_match(root_path.as_str()) {
                 for m in &mut matched[*root_id as usize..next_root_id as usize] {
                     *m.get_mut() = true;
                 }
@@ -42,7 +37,7 @@ fn traverse_tree(
     ctx: &FilterContext,
     matched: &[AtomicBool],
     node: &EntryNode,
-    path: &Path,
+    path: &Utf8Path,
 ) -> Result<()> {
     let regex = ctx.thread_local_regex();
 
@@ -58,19 +53,18 @@ fn traverse_tree(
             }
 
             let child_path = path.join(&ctx.database.basename_from_node(node));
-            if let Some(s) = child_path.to_str() {
-                if regex.is_match(s) {
-                    m.store(true, Ordering::Relaxed);
-                    if node.has_any_child() {
-                        super::match_all_descendants(ctx, matched, node)?;
-                    }
-                    return Ok(());
-                }
 
+            if regex.is_match(child_path.as_str()) {
+                m.store(true, Ordering::Relaxed);
                 if node.has_any_child() {
-                    traverse_tree(ctx, matched, node, &child_path)?;
-                    return Ok(());
+                    super::match_all_descendants(ctx, matched, node)?;
                 }
+                return Ok(());
+            }
+
+            if node.has_any_child() {
+                traverse_tree(ctx, matched, node, &child_path)?;
+                return Ok(());
             }
 
             Ok(())

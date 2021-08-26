@@ -1,6 +1,7 @@
 use super::{Entry, StatusKind};
 use crate::{Error, Result};
 
+use camino::Utf8Path;
 use std::{
     cmp::Ordering,
     path::{Path, PathBuf},
@@ -31,8 +32,8 @@ where
     Ok(dirs.into_iter().map(|(path, _)| path).collect())
 }
 
-pub fn get_basename(path: &Path) -> &std::ffi::OsStr {
-    path.file_name().unwrap_or_else(|| path.as_os_str())
+pub fn get_basename(path: &Utf8Path) -> &str {
+    path.file_name().unwrap_or_else(|| path.as_str())
 }
 
 pub fn get_compare_func(kind: StatusKind) -> fn(&Entry, &Entry) -> Ordering {
@@ -167,21 +168,21 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_get_basename() {
-        assert_eq!("/", get_basename(Path::new("/")));
-        assert_eq!("foo", get_basename(Path::new("/foo")));
-        assert_eq!("bar", get_basename(Path::new("/foo/bar")));
+        assert_eq!("/", get_basename(Utf8Path::new("/")));
+        assert_eq!("foo", get_basename(Utf8Path::new("/foo")));
+        assert_eq!("bar", get_basename(Utf8Path::new("/foo/bar")));
     }
 
     #[cfg(windows)]
     #[test]
     fn test_get_basename() {
-        assert_eq!(r"C:\", get_basename(Path::new(r"C:\")));
-        assert_eq!("foo", get_basename(Path::new(r"C:\foo")));
-        assert_eq!("bar", get_basename(Path::new(r"C:\foo\bar")));
+        assert_eq!(r"C:\", get_basename(Utf8Path::new(r"C:\")));
+        assert_eq!("foo", get_basename(Utf8Path::new(r"C:\foo")));
+        assert_eq!("bar", get_basename(Utf8Path::new(r"C:\foo\bar")));
         assert_eq!(
             r"\\server\share\",
-            get_basename(Path::new(r"\\server\share\"))
+            get_basename(Utf8Path::new(r"\\server\share\"))
         );
-        assert_eq!("foo", get_basename(Path::new(r"\\server\share\foo")));
+        assert_eq!("foo", get_basename(Utf8Path::new(r"\\server\share\foo")));
     }
 }

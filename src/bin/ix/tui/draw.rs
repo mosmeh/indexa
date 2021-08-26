@@ -41,16 +41,16 @@ impl<'a> TuiApp<'a> {
         let text = Span::raw(
             self.hits
                 .get(self.table_state.selected())
-                .and_then(|id| {
+                .map(|id| {
                     self.database
                         .as_ref()
                         .unwrap()
                         .entry(*id)
                         .path()
-                        .to_str()
-                        .map(|s| s.to_string())
+                        .as_str()
+                        .to_owned()
                 })
-                .unwrap_or_else(|| "".to_string()),
+                .unwrap_or_default(),
         );
         let paragraph = Paragraph::new(text);
         f.render_widget(paragraph, chunks[2]);
@@ -208,23 +208,14 @@ impl<'a> TuiApp<'a> {
         query: &Query,
     ) -> HighlightableText<impl Iterator<Item = Range<usize>>> {
         match kind {
-            StatusKind::Basename => query
-                .basename_matches(entry)
-                .map(|matches| {
-                    HighlightableText::Highlighted(
-                        entry.basename().to_string(),
-                        matches.into_iter(),
-                    )
-                })
-                .unwrap_or_default(),
-            StatusKind::Path => entry
-                .path()
-                .to_str()
-                .zip(query.path_matches(entry).ok())
-                .map(|(path_str, matches)| {
-                    HighlightableText::Highlighted(path_str.to_string(), matches.into_iter())
-                })
-                .unwrap_or_default(),
+            StatusKind::Basename => HighlightableText::Highlighted(
+                entry.basename().to_owned(),
+                query.basename_matches(entry).into_iter(),
+            ),
+            StatusKind::Path => HighlightableText::Highlighted(
+                entry.path().as_str().to_owned(),
+                query.path_matches(entry).into_iter(),
+            ),
             StatusKind::Extension => entry
                 .extension()
                 .map(|s| s.to_string().into())

@@ -149,10 +149,7 @@ impl<'a> TuiApp<'a> {
 
     pub fn handle_accept(&self) -> Result<()> {
         if let Some(id) = self.hits.get(self.table_state.selected()) {
-            println!(
-                "{}",
-                self.database.as_ref().unwrap().entry(*id).path().display()
-            );
+            println!("{}", self.database.as_ref().unwrap().entry(*id).path());
         }
         Ok(())
     }

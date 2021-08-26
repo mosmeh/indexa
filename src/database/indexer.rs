@@ -1,6 +1,7 @@
 use super::{util, Database, EntryNode, StatusFlags, StatusKind};
 use crate::{mode::Mode, Error, Result};
 
+use camino::{Utf8Path, Utf8PathBuf};
 use enum_map::{enum_map, EnumMap};
 use fxhash::FxHashMap;
 use hashbrown::{hash_map::RawEntryMut, HashMap};
@@ -73,16 +74,15 @@ impl<'a> Indexer<'a> {
         }
     }
 
-    pub fn index<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
-        let mut root_info = EntryInfo::from_path(path.as_ref(), self.options)?;
+    pub fn index<P: Into<PathBuf>>(mut self, path: P) -> Result<Self> {
+        let path = Utf8PathBuf::from_path_buf(path.into()).map_err(|_| Error::NonUtf8Path)?;
+
+        let mut root_info = EntryInfo::from_path(&path, self.options)?;
         let dir_entries = mem::take(&mut root_info.dir_entries);
 
         let root_node_id = self.ctx.database.nodes.len() as u32;
         self.ctx.push_entry(root_info, root_node_id);
-        self.ctx
-            .database
-            .root_paths
-            .insert(root_node_id, path.as_ref().to_path_buf());
+        self.ctx.database.root_paths.insert(root_node_id, path);
 
         if dir_entries.is_empty() {
             return Ok(self);
@@ -357,12 +357,11 @@ struct EntryInfo {
 }
 
 impl EntryInfo {
-    fn from_path<P: AsRef<Path>>(path: P, options: &IndexOptions) -> Result<Self> {
-        let name = util::get_basename(path.as_ref())
-            .to_str()
-            .ok_or(Error::NonUtf8Path)?
-            .to_string();
-        let metadata = path.as_ref().symlink_metadata()?;
+    fn from_path<P: AsRef<Utf8Path>>(path: P, options: &IndexOptions) -> Result<Self> {
+        let path = path.as_ref();
+
+        let name = util::get_basename(path).to_owned();
+        let metadata = path.symlink_metadata()?;
         let ftype = metadata.file_type();
 
         let (status, dir_entries) = if ftype.is_dir() {

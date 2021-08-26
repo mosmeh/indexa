@@ -7,10 +7,11 @@ pub use builder::DatabaseBuilder;
 
 use crate::{mode::Mode, Result};
 
+use camino::Utf8PathBuf;
 use enum_map::{Enum, EnumMap};
 use fxhash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, path::PathBuf, time::SystemTime};
+use std::{cmp::Ordering, time::SystemTime};
 use strum_macros::{Display, EnumIter};
 
 // Database can have multiple "root" entries, which correspond to directories
@@ -21,7 +22,7 @@ pub struct Database {
     /// names of all entries concatenated
     name_arena: String,
     nodes: Vec<EntryNode>,
-    root_paths: FxHashMap<u32, PathBuf>,
+    root_paths: FxHashMap<u32, Utf8PathBuf>,
     size: Option<Vec<u64>>,
     mode: Option<Vec<Mode>>,
     created: Option<Vec<SystemTime>>,
@@ -76,7 +77,7 @@ impl Database {
     }
 
     #[inline]
-    fn path_from_id(&self, id: u32) -> PathBuf {
+    fn path_from_id(&self, id: u32) -> Utf8PathBuf {
         let node = &self.nodes[id as usize];
         if node.parent == id {
             // root node
@@ -217,7 +218,7 @@ impl<'a> Entry<'a> {
     }
 
     #[inline]
-    pub fn path(&self) -> PathBuf {
+    pub fn path(&self) -> Utf8PathBuf {
         self.database.path_from_id(self.id.0)
     }
 
