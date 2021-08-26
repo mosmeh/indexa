@@ -183,12 +183,19 @@ impl<'a> TuiApp<'a> {
                 let err_str = err_str.trim();
 
                 // HACK: extract last line to fit in status bar
-                self.status = State::InvalidQuery(
-                    err_str
-                        .rsplit_once('\n')
-                        .map(|(_, s)| s.trim().to_string())
-                        .unwrap_or_else(|| err_str.to_string()),
-                );
+                let err_str = err_str
+                    .rsplit_once('\n')
+                    .map(|(_, s)| s.trim())
+                    .unwrap_or(err_str);
+
+                // capitalize first letter
+                let mut chars = err_str.chars();
+                let err_str = chars
+                    .next()
+                    .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+                    .unwrap_or_else(|| err_str.to_owned());
+
+                self.status = State::InvalidQuery(err_str);
             }
         }
 
