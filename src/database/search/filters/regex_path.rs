@@ -5,7 +5,7 @@ use camino::Utf8Path;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub struct RegexPathFilter;
+pub enum RegexPathFilter {}
 
 impl MatchEntries for RegexPathFilter {
     fn match_entries(ctx: &FilterContext, matched: &mut [AtomicBool]) -> Result<()> {

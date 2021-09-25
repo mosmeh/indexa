@@ -3,7 +3,7 @@ use crate::Result;
 
 use rayon::prelude::*;
 
-pub struct PassthroughFilter;
+pub enum PassthroughFilter {}
 
 impl Filter for PassthroughFilter {
     fn ordered(_: &FilterContext, ids: impl ParallelIterator<Item = u32>) -> Result<Vec<u32>> {

@@ -4,7 +4,7 @@ use crate::{Error, Result};
 use rayon::prelude::*;
 use std::sync::atomic::Ordering;
 
-pub struct BasenameFilter;
+pub enum BasenameFilter {}
 
 impl Filter for BasenameFilter {
     fn ordered(ctx: &FilterContext, ids: impl ParallelIterator<Item = u32>) -> Result<Vec<u32>> {

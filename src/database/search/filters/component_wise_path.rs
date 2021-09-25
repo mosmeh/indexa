@@ -4,7 +4,7 @@ use crate::{database::EntryNode, Error, Result};
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub struct ComponentWisePathFilter;
+pub enum ComponentWisePathFilter {}
 
 impl MatchEntries for ComponentWisePathFilter {
     fn match_entries(ctx: &FilterContext, matched: &mut [AtomicBool]) -> Result<()> {

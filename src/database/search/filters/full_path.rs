@@ -5,7 +5,7 @@ use camino::Utf8Path;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub struct FullPathFilter;
+pub enum FullPathFilter {}
 
 impl MatchEntries for FullPathFilter {
     fn match_entries(ctx: &FilterContext, matched: &mut [AtomicBool]) -> Result<()> {
