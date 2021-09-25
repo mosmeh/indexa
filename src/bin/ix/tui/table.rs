@@ -44,19 +44,10 @@ use tui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct TableState {
     offset: usize,
     selected: usize,
-}
-
-impl Default for TableState {
-    fn default() -> TableState {
-        TableState {
-            offset: 0,
-            selected: 0,
-        }
-    }
 }
 
 impl TableState {

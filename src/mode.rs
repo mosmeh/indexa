@@ -6,24 +6,12 @@ pub mod windows;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Mode(u32);
-
-impl Default for Mode {
-    fn default() -> Self {
-        Self(0)
-    }
-}
 
 impl From<u32> for Mode {
     fn from(value: u32) -> Self {
         Self(value)
-    }
-}
-
-impl Mode {
-    pub fn new() -> Self {
-        Default::default()
     }
 }
 
