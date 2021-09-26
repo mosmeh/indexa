@@ -8,7 +8,7 @@ use hashbrown::{hash_map::RawEntryMut, HashMap};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::{
-    fs::{self, FileType, Metadata},
+    fs::{self, Metadata},
     mem,
     path::{Path, PathBuf},
     time::SystemTime,
@@ -171,7 +171,7 @@ impl WalkContext {
             parent: parent_id,
             child_start: u32::MAX,
             child_end: u32::MAX,
-            is_dir: info.ftype.is_dir(),
+            is_dir: info.is_dir,
         });
 
         if let Some(status) = info.status {
@@ -203,7 +203,7 @@ fn walk_file_system(
     let (mut child_dirs, child_files) = dir_entries
         .into_iter()
         .filter_map(|dent| EntryInfo::from_dir_entry(dent, options).ok())
-        .partition::<Vec<_>, _>(|info| info.ftype.is_dir());
+        .partition::<Vec<_>, _>(|info| info.is_dir);
 
     if child_dirs.is_empty() && child_files.is_empty() {
         return;
@@ -272,7 +272,7 @@ fn list_dir<P: AsRef<Path>>(path: P, options: &IndexOptions) -> Result<(Vec<DirE
 struct DirEntry {
     name: String,
     path: PathBuf,
-    ftype: FileType,
+    is_dir: bool,
     metadata: Option<Metadata>,
 }
 
@@ -293,7 +293,7 @@ impl DirEntry {
         Ok(Self {
             name,
             path: dent.path(),
-            ftype: dent.file_type()?,
+            is_dir: dent.file_type()?.is_dir(),
             metadata,
         })
     }
@@ -351,7 +351,7 @@ impl EntryStatus {
 /// Struct holding information needed to create single entry and iterate over its children.
 struct EntryInfo {
     name: String,
-    ftype: FileType,
+    is_dir: bool,
     status: Option<EntryStatus>,
     dir_entries: Vec<DirEntry>,
 }
@@ -360,11 +360,10 @@ impl EntryInfo {
     fn from_path<P: AsRef<Utf8Path>>(path: P, options: &IndexOptions) -> Result<Self> {
         let path = path.as_ref();
 
-        let name = util::get_basename(path).to_owned();
         let metadata = path.symlink_metadata()?;
-        let ftype = metadata.file_type();
+        let is_dir = metadata.is_dir();
 
-        let (status, dir_entries) = if ftype.is_dir() {
+        let (status, dir_entries) = if is_dir {
             let (dir_entries, num_children) = list_dir(path, options).unwrap_or_default();
             let status = if options.needs_metadata() {
                 Some(EntryStatus::from_metadata_and_size(
@@ -388,15 +387,15 @@ impl EntryInfo {
         };
 
         Ok(Self {
-            name,
-            ftype,
+            name: util::get_basename(path).to_owned(),
+            is_dir,
             status,
             dir_entries,
         })
     }
 
     fn from_dir_entry(dent: DirEntry, options: &IndexOptions) -> Result<Self> {
-        let (status, dir_entries) = if dent.ftype.is_dir() {
+        let (status, dir_entries) = if dent.is_dir {
             let (dir_entries, num_children) = list_dir(&dent.path, options).unwrap_or_default();
             let status = if let Some(metadata) = dent.metadata {
                 Some(EntryStatus::from_metadata_and_size(
@@ -421,7 +420,7 @@ impl EntryInfo {
 
         Ok(Self {
             name: dent.name,
-            ftype: dent.ftype,
+            is_dir: dent.is_dir,
             status,
             dir_entries,
         })
