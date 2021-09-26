@@ -89,7 +89,7 @@ impl<'a> Indexer<'a> {
         }
 
         let ctx = Mutex::new(self.ctx);
-        walk_file_system(&ctx, self.options, root_node_id, dir_entries);
+        walk_file_system(&ctx, self.options, root_node_id, dir_entries.into());
         self.ctx = ctx.into_inner();
 
         Ok(self)
@@ -133,7 +133,7 @@ impl WalkContext {
         let hash_entry = {
             let name_arena = &self.database.name_arena;
             self.name_spans.raw_entry_mut().from_hash(hash, |span| {
-                name_arena[span.start..][..span.len as usize] == info.name
+                name_arena[span.start..][..span.len as usize] == *info.name
             })
         };
 
@@ -161,8 +161,8 @@ impl WalkContext {
             }
         };
         debug_assert_eq!(
-            &self.database.name_arena[name_start..][..info.name.len()],
-            info.name
+            self.database.name_arena[name_start..][..info.name.len()],
+            *info.name
         );
 
         self.database.nodes.push(EntryNode {
@@ -239,7 +239,7 @@ fn walk_file_system(
         .into_par_iter()
         .zip(child_dir_entries.into_par_iter())
         .filter(|(_, dir_entries)| !dir_entries.is_empty())
-        .for_each(|(id, dir_entries)| walk_file_system(ctx, options, id, dir_entries));
+        .for_each(|(id, dir_entries)| walk_file_system(ctx, options, id, dir_entries.into()));
 }
 
 fn list_dir<P: AsRef<Path>>(path: P, options: &IndexOptions) -> Result<(Vec<DirEntry>, u64)> {
@@ -270,31 +270,22 @@ fn list_dir<P: AsRef<Path>>(path: P, options: &IndexOptions) -> Result<(Vec<DirE
 // We avoid the problem by extracting information into our DirEntry and
 // discarding std::fs::DirEntry.
 struct DirEntry {
-    name: String,
-    path: PathBuf,
+    name: Box<str>,
+    path: Box<Path>,
     is_dir: bool,
     metadata: Option<Metadata>,
 }
 
 impl DirEntry {
     fn from_std_dir_entry(dent: fs::DirEntry, options: &IndexOptions) -> Result<Self> {
-        let name = dent
-            .file_name()
-            .to_str()
-            .ok_or(Error::NonUtf8Path)?
-            .to_string();
-
-        let metadata = if options.needs_metadata() {
-            Some(dent.metadata()?)
-        } else {
-            None
-        };
-
         Ok(Self {
-            name,
-            path: dent.path(),
+            name: dent.file_name().to_str().ok_or(Error::NonUtf8Path)?.into(),
+            path: dent.path().into(),
             is_dir: dent.file_type()?.is_dir(),
-            metadata,
+            metadata: options
+                .needs_metadata()
+                .then(|| dent.metadata())
+                .transpose()?,
         })
     }
 }
@@ -350,10 +341,10 @@ impl EntryStatus {
 
 /// Struct holding information needed to create single entry and iterate over its children.
 struct EntryInfo {
-    name: String,
+    name: Box<str>,
     is_dir: bool,
     status: Option<EntryStatus>,
-    dir_entries: Vec<DirEntry>,
+    dir_entries: Box<[DirEntry]>,
 }
 
 impl EntryInfo {
@@ -375,7 +366,7 @@ impl EntryInfo {
                 None
             };
 
-            (status, dir_entries)
+            (status, dir_entries.into())
         } else {
             let status = if options.needs_metadata() {
                 Some(EntryStatus::from_metadata(&metadata, options)?)
@@ -383,11 +374,11 @@ impl EntryInfo {
                 None
             };
 
-            (status, Vec::new())
+            (status, Box::default())
         };
 
         Ok(Self {
-            name: util::get_basename(path).to_owned(),
+            name: util::get_basename(path).into(),
             is_dir,
             status,
             dir_entries,
@@ -407,7 +398,7 @@ impl EntryInfo {
                 None
             };
 
-            (status, dir_entries)
+            (status, dir_entries.into())
         } else {
             let status = if let Some(metadata) = dent.metadata {
                 Some(EntryStatus::from_metadata(&metadata, options)?)
@@ -415,7 +406,7 @@ impl EntryInfo {
                 None
             };
 
-            (status, Vec::new())
+            (status, Box::default())
         };
 
         Ok(Self {
