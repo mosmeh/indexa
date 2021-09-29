@@ -358,37 +358,16 @@ struct EntryInfo {
 impl EntryInfo {
     fn from_path<P: AsRef<Utf8Path>>(path: P, options: &IndexOptions) -> Result<Self> {
         let path = path.as_ref();
-
         let metadata = path.symlink_metadata()?;
-        let is_dir = metadata.is_dir();
 
-        let (status, dir_entries) = if is_dir {
-            let (dir_entries, num_children) = list_dir(path, options).unwrap_or_default();
-            let status = options
-                .needs_metadata()
-                .then(|| {
-                    EntryStatus::from_metadata_and_size(&metadata, Some(num_children), options)
-                })
-                .transpose()?
-                .unwrap_or_default();
-
-            (status, dir_entries.into())
-        } else {
-            let status = options
-                .needs_metadata()
-                .then(|| EntryStatus::from_metadata(&metadata, options))
-                .transpose()?
-                .unwrap_or_default();
-
-            (status, Box::default())
+        let dent = DirEntry {
+            name: util::get_basename(path).into(),
+            path: path.into(),
+            is_dir: metadata.is_dir(),
+            metadata: options.needs_metadata().then(|| metadata),
         };
 
-        Ok(Self {
-            name: util::get_basename(path).into(),
-            is_dir,
-            status,
-            dir_entries,
-        })
+        Self::from_dir_entry(dent, options)
     }
 
     fn from_dir_entry(dent: DirEntry, options: &IndexOptions) -> Result<Self> {
