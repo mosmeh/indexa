@@ -174,22 +174,21 @@ impl WalkContext {
             is_dir: info.is_dir,
         });
 
-        if let Some(status) = info.status {
-            if let Some(size) = &mut self.database.size {
-                size.push(status.size.unwrap());
-            }
-            if let Some(mode) = &mut self.database.mode {
-                mode.push(status.mode.unwrap());
-            }
-            if let Some(created) = &mut self.database.created {
-                created.push(status.created.unwrap());
-            }
-            if let Some(modified) = &mut self.database.modified {
-                modified.push(status.modified.unwrap());
-            }
-            if let Some(accessed) = &mut self.database.accessed {
-                accessed.push(status.accessed.unwrap());
-            }
+        let status = info.status;
+        if let Some(size) = &mut self.database.size {
+            size.push(status.size);
+        }
+        if let Some(mode) = &mut self.database.mode {
+            mode.push(status.mode);
+        }
+        if let Some(created) = &mut self.database.created {
+            created.push(status.created);
+        }
+        if let Some(modified) = &mut self.database.modified {
+            modified.push(status.modified);
+        }
+        if let Some(accessed) = &mut self.database.accessed {
+            accessed.push(status.accessed);
         }
     }
 }
@@ -291,50 +290,59 @@ impl DirEntry {
 }
 
 /// Our representation of metadata.
+///
+/// Fields corresponding to non-indexed statuses are never referenced, so they
+/// are filled with dummy values.
 struct EntryStatus {
-    size: Option<u64>,
-    mode: Option<Mode>,
-    created: Option<SystemTime>,
-    modified: Option<SystemTime>,
-    accessed: Option<SystemTime>,
+    size: u64,
+    mode: Mode,
+    created: SystemTime,
+    modified: SystemTime,
+    accessed: SystemTime,
+}
+
+impl Default for EntryStatus {
+    fn default() -> Self {
+        Self {
+            size: 0,
+            mode: Mode::default(),
+            created: SystemTime::UNIX_EPOCH,
+            modified: SystemTime::UNIX_EPOCH,
+            accessed: SystemTime::UNIX_EPOCH,
+        }
+    }
 }
 
 impl EntryStatus {
     fn from_metadata(metadata: &Metadata, options: &IndexOptions) -> Result<Self> {
         let size = options.index_flags[StatusKind::Size].then(|| metadata.len());
-        Self::from_metadata_and_size(metadata, size, options)
+        Self::from_metadata_and_size(metadata, size.unwrap_or_default(), options)
     }
 
     fn from_metadata_and_size(
         metadata: &Metadata,
-        size: Option<u64>,
+        size: u64,
         options: &IndexOptions,
     ) -> Result<Self> {
-        let mode = options.index_flags[StatusKind::Mode].then(|| metadata.into());
-
-        let created = if options.index_flags[StatusKind::Created] {
-            Some(util::sanitize_system_time(&metadata.created()?))
-        } else {
-            None
-        };
-        let modified = if options.index_flags[StatusKind::Modified] {
-            Some(util::sanitize_system_time(&metadata.modified()?))
-        } else {
-            None
-        };
-        let accessed = if options.index_flags[StatusKind::Accessed] {
-            Some(util::sanitize_system_time(&metadata.accessed()?))
-        } else {
-            None
-        };
-
-        let status = Self {
+        let mut status = Self {
             size,
-            mode,
-            created,
-            modified,
-            accessed,
+            ..Self::default()
         };
+
+        if options.index_flags[StatusKind::Mode] {
+            status.mode = metadata.into();
+        }
+
+        if options.index_flags[StatusKind::Created] {
+            status.created = util::sanitize_system_time(&metadata.created()?);
+        }
+        if options.index_flags[StatusKind::Modified] {
+            status.modified = util::sanitize_system_time(&metadata.modified()?);
+        }
+        if options.index_flags[StatusKind::Accessed] {
+            status.accessed = util::sanitize_system_time(&metadata.accessed()?);
+        }
+
         Ok(status)
     }
 }
@@ -343,7 +351,7 @@ impl EntryStatus {
 struct EntryInfo {
     name: Box<str>,
     is_dir: bool,
-    status: Option<EntryStatus>,
+    status: EntryStatus,
     dir_entries: Box<[DirEntry]>,
 }
 
@@ -356,23 +364,21 @@ impl EntryInfo {
 
         let (status, dir_entries) = if is_dir {
             let (dir_entries, num_children) = list_dir(path, options).unwrap_or_default();
-            let status = if options.needs_metadata() {
-                Some(EntryStatus::from_metadata_and_size(
-                    &metadata,
-                    Some(num_children),
-                    options,
-                )?)
-            } else {
-                None
-            };
+            let status = options
+                .needs_metadata()
+                .then(|| {
+                    EntryStatus::from_metadata_and_size(&metadata, Some(num_children), options)
+                })
+                .transpose()?
+                .unwrap_or_default();
 
             (status, dir_entries.into())
         } else {
-            let status = if options.needs_metadata() {
-                Some(EntryStatus::from_metadata(&metadata, options)?)
-            } else {
-                None
-            };
+            let status = options
+                .needs_metadata()
+                .then(|| EntryStatus::from_metadata(&metadata, options))
+                .transpose()?
+                .unwrap_or_default();
 
             (status, Box::default())
         };
@@ -388,23 +394,21 @@ impl EntryInfo {
     fn from_dir_entry(dent: DirEntry, options: &IndexOptions) -> Result<Self> {
         let (status, dir_entries) = if dent.is_dir {
             let (dir_entries, num_children) = list_dir(&dent.path, options).unwrap_or_default();
-            let status = if let Some(metadata) = dent.metadata {
-                Some(EntryStatus::from_metadata_and_size(
-                    &metadata,
-                    Some(num_children),
-                    options,
-                )?)
-            } else {
-                None
-            };
+            let status = dent
+                .metadata
+                .map(|metadata| {
+                    EntryStatus::from_metadata_and_size(&metadata, num_children, options)
+                })
+                .transpose()?
+                .unwrap_or_default();
 
             (status, dir_entries.into())
         } else {
-            let status = if let Some(metadata) = dent.metadata {
-                Some(EntryStatus::from_metadata(&metadata, options)?)
-            } else {
-                None
-            };
+            let status = dent
+                .metadata
+                .map(|metadata| EntryStatus::from_metadata(&metadata, options))
+                .transpose()?
+                .unwrap_or_default();
 
             (status, Box::default())
         };
