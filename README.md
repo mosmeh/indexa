@@ -38,7 +38,9 @@ ix -u
 
 ## Configuration
 
-indexa's configuration file is located at `~/.config/indexa/config.toml` on Unix and `C:\Users\<USER>\AppData\Roaming\indexa\config.toml` on Windows.
+indexa's behavior and appearance can be customized by editing a config file.
+
+The config file is located at `~/.config/indexa/config.toml` on Unix and `%APPDATA%\indexa\config.toml` on Windows.
 
 ## Key bindings
 
