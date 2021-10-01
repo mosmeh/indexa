@@ -8,7 +8,6 @@ use hashbrown::{hash_map::RawEntryMut, HashMap};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::{
-    mem,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -76,20 +75,26 @@ impl<'a> Indexer<'a> {
     pub fn index<P: Into<PathBuf>>(mut self, path: P) -> Result<Self> {
         let path = Utf8PathBuf::from_path_buf(path.into()).map_err(|_| Error::NonUtf8Path)?;
 
-        let mut root_info = EntryInfo::from_path(&path, self.options)?;
-        let dir_entries = mem::take(&mut root_info.dir_entries);
-
+        let root_entry = LeafOrInternalEntry::from_path(&path, self.options)?;
         let root_node_id = self.ctx.database.nodes.len() as u32;
-        self.ctx.push_entry(root_info, root_node_id);
         self.ctx.database.root_paths.insert(root_node_id, path);
 
-        if dir_entries.is_empty() {
-            return Ok(self);
+        match root_entry {
+            LeafOrInternalEntry::Leaf(entry) => {
+                self.ctx.push_leaf_entry(&entry, root_node_id);
+            }
+            LeafOrInternalEntry::Internal(entry) => {
+                self.ctx.push_internal_entry(&entry, root_node_id);
+                let ctx = Mutex::new(self.ctx);
+                walk_file_system(
+                    &ctx,
+                    self.options,
+                    root_node_id,
+                    entry.child_dir_entries.into(),
+                );
+                self.ctx = ctx.into_inner();
+            }
         }
-
-        let ctx = Mutex::new(self.ctx);
-        walk_file_system(&ctx, self.options, root_node_id, dir_entries.into());
-        self.ctx = ctx.into_inner();
 
         Ok(self)
     }
@@ -127,16 +132,24 @@ impl WalkContext {
         self.database
     }
 
-    fn push_entry(&mut self, info: EntryInfo, parent_id: u32) {
-        let hash = fxhash::hash64(&info.name);
+    fn push_leaf_entry(&mut self, entry: &LeafEntry, parent_id: u32) {
+        self.push_entry(&entry.name, &entry.metadata, entry.is_dir, parent_id);
+    }
+
+    fn push_internal_entry(&mut self, entry: &InternalEntry, parent_id: u32) {
+        self.push_entry(&entry.name, &entry.metadata, true, parent_id);
+    }
+
+    fn push_entry(&mut self, name: &str, metadata: &Metadata, is_dir: bool, parent_id: u32) {
+        let hash = fxhash::hash64(name);
         let hash_entry = {
             let name_arena = &self.database.name_arena;
             self.name_spans.raw_entry_mut().from_hash(hash, |span| {
-                name_arena[span.start..][..span.len as usize] == *info.name
+                &name_arena[span.start..][..span.len as usize] == name
             })
         };
 
-        let name_len = info.name.len() as u16;
+        let name_len = name.len() as u16;
         let name_start = match hash_entry {
             RawEntryMut::Occupied(entry) => {
                 let NameSpan { start, len } = *entry.key();
@@ -146,7 +159,7 @@ impl WalkContext {
             RawEntryMut::Vacant(entry) => {
                 let name_arena = &mut self.database.name_arena;
                 let start = name_arena.len();
-                name_arena.push_str(&info.name);
+                name_arena.push_str(name);
                 entry.insert_with_hasher(
                     hash,
                     NameSpan {
@@ -159,10 +172,7 @@ impl WalkContext {
                 start
             }
         };
-        debug_assert_eq!(
-            self.database.name_arena[name_start..][..info.name.len()],
-            *info.name
-        );
+        debug_assert_eq!(&self.database.name_arena[name_start..][..name.len()], name);
 
         self.database.nodes.push(EntryNode {
             name_start,
@@ -170,10 +180,9 @@ impl WalkContext {
             parent: parent_id,
             child_start: u32::MAX,
             child_end: u32::MAX,
-            is_dir: info.is_dir,
+            is_dir,
         });
 
-        let metadata = info.metadata;
         if let Some(size) = &mut self.database.size {
             size.push(metadata.size);
         }
@@ -198,46 +207,44 @@ fn walk_file_system(
     parent_id: u32,
     dir_entries: Vec<DirEntry>,
 ) {
-    let (mut child_dirs, child_files) = dir_entries
-        .into_iter()
-        .filter_map(|dent| EntryInfo::from_dir_entry(dent, options).ok())
-        .partition::<Vec<_>, _>(|info| info.is_dir);
-
-    if child_dirs.is_empty() && child_files.is_empty() {
-        return;
+    let mut child_leaf_entries = Vec::new();
+    let mut child_internal_entries = Vec::new();
+    for dent in dir_entries {
+        match LeafOrInternalEntry::from_dir_entry(dent, options) {
+            LeafOrInternalEntry::Leaf(entry) => {
+                child_leaf_entries.push(entry);
+            }
+            LeafOrInternalEntry::Internal(entry) => {
+                child_internal_entries.push(entry);
+            }
+        }
     }
 
-    let child_dir_entries: Vec<_> = child_dirs
-        .iter_mut()
-        .map(|info| mem::take(&mut info.dir_entries))
-        .collect();
-
-    let (dir_start, dir_end) = {
+    let (internal_start, internal_end) = {
         let mut ctx = ctx.lock();
 
         let child_start = ctx.database.nodes.len() as u32;
-        let dir_end = child_start + child_dirs.len() as u32;
-        let child_end = dir_end + child_files.len() as u32;
+        let internal_end = child_start + child_internal_entries.len() as u32;
+        let child_end = internal_end + child_leaf_entries.len() as u32;
 
         let mut parent_node = &mut ctx.database.nodes[parent_id as usize];
         parent_node.child_start = child_start;
         parent_node.child_end = child_end;
 
-        for info in child_dirs {
-            ctx.push_entry(info, parent_id);
+        for entry in &child_internal_entries {
+            ctx.push_internal_entry(entry, parent_id);
         }
-        for info in child_files {
-            ctx.push_entry(info, parent_id);
+        for entry in child_leaf_entries {
+            ctx.push_leaf_entry(&entry, parent_id);
         }
 
-        (child_start, dir_end)
+        (child_start, internal_end)
     };
 
-    (dir_start..dir_end)
+    (internal_start..internal_end)
         .into_par_iter()
-        .zip(child_dir_entries.into_par_iter())
-        .filter(|(_, dir_entries)| !dir_entries.is_empty())
-        .for_each(|(id, dir_entries)| walk_file_system(ctx, options, id, dir_entries.into()));
+        .zip(child_internal_entries.into_par_iter())
+        .for_each(|(id, entry)| walk_file_system(ctx, options, id, entry.child_dir_entries.into()));
 }
 
 fn list_dir<P: AsRef<Path>>(path: P, options: &IndexOptions) -> Result<(Vec<DirEntry>, u64)> {
@@ -345,15 +352,59 @@ impl Metadata {
     }
 }
 
-/// Struct holding information needed to create single entry and iterate over its children.
-struct EntryInfo {
+/// An entry that has no children.
+///
+/// This can be a file or a directory.
+struct LeafEntry {
     name: Box<str>,
     is_dir: bool,
     metadata: Metadata,
-    dir_entries: Box<[DirEntry]>,
 }
 
-impl EntryInfo {
+/// An entry that has at least one children.
+///
+/// All internal entries are, by definition, directories.
+struct InternalEntry {
+    name: Box<str>,
+    metadata: Metadata,
+    child_dir_entries: Box<[DirEntry]>,
+}
+
+enum LeafOrInternalEntry {
+    Leaf(LeafEntry),
+    Internal(InternalEntry),
+}
+
+impl LeafOrInternalEntry {
+    fn from_dir_entry(dent: DirEntry, options: &IndexOptions) -> Self {
+        if !dent.is_dir {
+            return Self::Leaf(LeafEntry {
+                name: dent.name,
+                is_dir: false,
+                metadata: dent.metadata,
+            });
+        }
+
+        let (dir_entries, num_children) = list_dir(&dent.path, options).unwrap_or_default();
+        let metadata = Metadata {
+            size: num_children,
+            ..dent.metadata
+        };
+        if dir_entries.is_empty() {
+            Self::Leaf(LeafEntry {
+                name: dent.name,
+                is_dir: true,
+                metadata,
+            })
+        } else {
+            Self::Internal(InternalEntry {
+                name: dent.name,
+                metadata,
+                child_dir_entries: dir_entries.into(),
+            })
+        }
+    }
+
     fn from_path<P: AsRef<Utf8Path>>(path: P, options: &IndexOptions) -> Result<Self> {
         let path = path.as_ref();
         let metadata = path.symlink_metadata()?;
@@ -369,26 +420,6 @@ impl EntryInfo {
                 .unwrap_or_default(),
         };
 
-        Self::from_dir_entry(dent, options)
-    }
-
-    fn from_dir_entry(dent: DirEntry, options: &IndexOptions) -> Result<Self> {
-        let (metadata, dir_entries) = if dent.is_dir {
-            let (dir_entries, num_children) = list_dir(&dent.path, options).unwrap_or_default();
-            let metadata = Metadata {
-                size: num_children,
-                ..dent.metadata
-            };
-            (metadata, dir_entries.into())
-        } else {
-            (dent.metadata, Box::default())
-        };
-
-        Ok(Self {
-            name: dent.name,
-            is_dir: dent.is_dir,
-            metadata,
-            dir_entries,
-        })
+        Ok(Self::from_dir_entry(dent, options))
     }
 }
