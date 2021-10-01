@@ -8,7 +8,6 @@ use hashbrown::{hash_map::RawEntryMut, HashMap};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::{
-    fs::{self, Metadata},
     mem,
     path::{Path, PathBuf},
     time::SystemTime,
@@ -174,21 +173,21 @@ impl WalkContext {
             is_dir: info.is_dir,
         });
 
-        let status = info.status;
+        let metadata = info.metadata;
         if let Some(size) = &mut self.database.size {
-            size.push(status.size);
+            size.push(metadata.size);
         }
         if let Some(mode) = &mut self.database.mode {
-            mode.push(status.mode);
+            mode.push(metadata.mode);
         }
         if let Some(created) = &mut self.database.created {
-            created.push(status.created);
+            created.push(metadata.created);
         }
         if let Some(modified) = &mut self.database.modified {
-            modified.push(status.modified);
+            modified.push(metadata.modified);
         }
         if let Some(accessed) = &mut self.database.accessed {
-            accessed.push(status.accessed);
+            accessed.push(metadata.accessed);
         }
     }
 }
@@ -272,28 +271,29 @@ struct DirEntry {
     name: Box<str>,
     path: Box<Path>,
     is_dir: bool,
-    metadata: Option<Metadata>,
+    metadata: Metadata,
 }
 
 impl DirEntry {
-    fn from_std_dir_entry(dent: fs::DirEntry, options: &IndexOptions) -> Result<Self> {
+    fn from_std_dir_entry(dent: std::fs::DirEntry, options: &IndexOptions) -> Result<Self> {
         Ok(Self {
             name: dent.file_name().to_str().ok_or(Error::NonUtf8Path)?.into(),
             path: dent.path().into(),
             is_dir: dent.file_type()?.is_dir(),
-            metadata: options
-                .needs_metadata()
-                .then(|| dent.metadata())
-                .transpose()?,
+            metadata: if options.needs_metadata() {
+                Metadata::from_std_metadata(&dent.metadata()?, options)?
+            } else {
+                Metadata::default()
+            },
         })
     }
 }
 
-/// Our representation of metadata.
+/// Our version of Metadata.
 ///
 /// Fields corresponding to non-indexed statuses are never referenced, so they
 /// are filled with dummy values.
-struct EntryStatus {
+struct Metadata {
     size: u64,
     mode: Mode,
     created: SystemTime,
@@ -301,7 +301,7 @@ struct EntryStatus {
     accessed: SystemTime,
 }
 
-impl Default for EntryStatus {
+impl Default for Metadata {
     fn default() -> Self {
         Self {
             size: 0,
@@ -313,37 +313,35 @@ impl Default for EntryStatus {
     }
 }
 
-impl EntryStatus {
-    fn from_metadata(metadata: &Metadata, options: &IndexOptions) -> Result<Self> {
-        let size = options.index_flags[StatusKind::Size].then(|| metadata.len());
-        Self::from_metadata_and_size(metadata, size.unwrap_or_default(), options)
-    }
-
-    fn from_metadata_and_size(
-        metadata: &Metadata,
-        size: u64,
-        options: &IndexOptions,
-    ) -> Result<Self> {
-        let mut status = Self {
-            size,
-            ..Self::default()
-        };
-
-        if options.index_flags[StatusKind::Mode] {
-            status.mode = metadata.into();
-        }
-
-        if options.index_flags[StatusKind::Created] {
-            status.created = util::sanitize_system_time(&metadata.created()?);
-        }
-        if options.index_flags[StatusKind::Modified] {
-            status.modified = util::sanitize_system_time(&metadata.modified()?);
-        }
-        if options.index_flags[StatusKind::Accessed] {
-            status.accessed = util::sanitize_system_time(&metadata.accessed()?);
-        }
-
-        Ok(status)
+impl Metadata {
+    fn from_std_metadata(metadata: &std::fs::Metadata, options: &IndexOptions) -> Result<Self> {
+        Ok(Self {
+            size: if options.index_flags[StatusKind::Size] {
+                metadata.len()
+            } else {
+                0
+            },
+            mode: if options.index_flags[StatusKind::Mode] {
+                metadata.into()
+            } else {
+                Mode::default()
+            },
+            created: if options.index_flags[StatusKind::Created] {
+                util::sanitize_system_time(&metadata.created()?)
+            } else {
+                SystemTime::UNIX_EPOCH
+            },
+            modified: if options.index_flags[StatusKind::Modified] {
+                util::sanitize_system_time(&metadata.modified()?)
+            } else {
+                SystemTime::UNIX_EPOCH
+            },
+            accessed: if options.index_flags[StatusKind::Accessed] {
+                util::sanitize_system_time(&metadata.accessed()?)
+            } else {
+                SystemTime::UNIX_EPOCH
+            },
+        })
     }
 }
 
@@ -351,7 +349,7 @@ impl EntryStatus {
 struct EntryInfo {
     name: Box<str>,
     is_dir: bool,
-    status: EntryStatus,
+    metadata: Metadata,
     dir_entries: Box<[DirEntry]>,
 }
 
@@ -364,38 +362,32 @@ impl EntryInfo {
             name: util::get_basename(path).into(),
             path: path.into(),
             is_dir: metadata.is_dir(),
-            metadata: options.needs_metadata().then(|| metadata),
+            metadata: options
+                .needs_metadata()
+                .then(|| Metadata::from_std_metadata(&metadata, options))
+                .transpose()?
+                .unwrap_or_default(),
         };
 
         Self::from_dir_entry(dent, options)
     }
 
     fn from_dir_entry(dent: DirEntry, options: &IndexOptions) -> Result<Self> {
-        let (status, dir_entries) = if dent.is_dir {
+        let (metadata, dir_entries) = if dent.is_dir {
             let (dir_entries, num_children) = list_dir(&dent.path, options).unwrap_or_default();
-            let status = dent
-                .metadata
-                .map(|metadata| {
-                    EntryStatus::from_metadata_and_size(&metadata, num_children, options)
-                })
-                .transpose()?
-                .unwrap_or_default();
-
-            (status, dir_entries.into())
+            let metadata = Metadata {
+                size: num_children,
+                ..dent.metadata
+            };
+            (metadata, dir_entries.into())
         } else {
-            let status = dent
-                .metadata
-                .map(|metadata| EntryStatus::from_metadata(&metadata, options))
-                .transpose()?
-                .unwrap_or_default();
-
-            (status, Box::default())
+            (dent.metadata, Box::default())
         };
 
         Ok(Self {
             name: dent.name,
             is_dir: dent.is_dir,
-            status,
+            metadata,
             dir_entries,
         })
     }
