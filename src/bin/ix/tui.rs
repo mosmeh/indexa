@@ -89,7 +89,7 @@ impl<'a> TuiApp<'a> {
 
         let database = loop {
             let terminal_width = terminal.size()?.width;
-            terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
+            terminal.draw(|f| self.draw(f, terminal_width))?;
 
             crossbeam_channel::select! {
                 recv(load_rx) -> database => {
@@ -119,7 +119,7 @@ impl<'a> TuiApp<'a> {
 
             loop {
                 let terminal_width = terminal.size()?.width;
-                terminal.draw(|mut f| self.draw(&mut f, terminal_width))?;
+                terminal.draw(|f| self.draw(f, terminal_width))?;
 
                 crossbeam_channel::select! {
                     recv(result_rx) -> hits => self.handle_search_result(hits?)?,
