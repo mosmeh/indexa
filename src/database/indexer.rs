@@ -37,9 +37,9 @@ impl Default for IndexOptions {
 
 impl IndexOptions {
     #[inline]
-    fn needs_metadata(&self) -> bool {
+    fn needs_metadata(&self, is_dir: bool) -> bool {
         let flags = &self.index_flags;
-        flags[StatusKind::Size]
+        (!is_dir && flags[StatusKind::Size]) // "size" of a directory is overwritten with a number of its children
             || flags[StatusKind::Mode]
             || flags[StatusKind::Created]
             || flags[StatusKind::Modified]
@@ -283,11 +283,12 @@ struct DirEntry {
 
 impl DirEntry {
     fn from_std_dir_entry(dent: std::fs::DirEntry, options: &IndexOptions) -> Result<Self> {
+        let is_dir = dent.file_type()?.is_dir();
         Ok(Self {
             name: dent.file_name().to_str().ok_or(Error::NonUtf8Path)?.into(),
             path: dent.path().into(),
-            is_dir: dent.file_type()?.is_dir(),
-            metadata: if options.needs_metadata() {
+            is_dir,
+            metadata: if options.needs_metadata(is_dir) {
                 Metadata::from_std_metadata(&dent.metadata()?, options)?
             } else {
                 Metadata::default()
@@ -408,13 +409,14 @@ impl LeafOrInternalEntry {
     fn from_path<P: AsRef<Utf8Path>>(path: P, options: &IndexOptions) -> Result<Self> {
         let path = path.as_ref();
         let metadata = path.symlink_metadata()?;
+        let is_dir = metadata.is_dir();
 
         let dent = DirEntry {
             name: util::get_basename(path).into(),
             path: path.into(),
-            is_dir: metadata.is_dir(),
+            is_dir,
             metadata: options
-                .needs_metadata()
+                .needs_metadata(is_dir)
                 .then(|| Metadata::from_std_metadata(&metadata, options))
                 .transpose()?
                 .unwrap_or_default(),
