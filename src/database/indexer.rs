@@ -362,7 +362,7 @@ struct LeafEntry {
     metadata: Metadata,
 }
 
-/// An entry that has at least one children.
+/// An entry that has at least one child.
 ///
 /// All internal entries are, by definition, directories.
 struct InternalEntry {
