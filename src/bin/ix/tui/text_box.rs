@@ -44,15 +44,17 @@ impl StatefulWidget for TextBox<'_> {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let grapheme_indices = UnicodeSegmentation::grapheme_indices(state.text.as_str(), true);
+        let cursor = state.grapheme_cursor.cur_cursor();
+
         let mut text = vec![self.prompt.clone()];
         text.extend(grapheme_indices.map(|(i, grapheme)| {
-            if i == state.grapheme_cursor.cur_cursor() {
+            if i == cursor {
                 Span::styled(grapheme, self.highlight_style)
             } else {
                 Span::styled(grapheme, self.style)
             }
         }));
-        if state.grapheme_cursor.cur_cursor() >= state.text.len() {
+        if cursor >= state.text.len() {
             text.push(Span::styled(" ", self.highlight_style));
         }
 
@@ -90,25 +92,24 @@ impl TextBoxState {
     }
 
     pub fn on_char(&mut self, ch: char) {
-        self.text.insert(self.grapheme_cursor.cur_cursor(), ch);
-        self.grapheme_cursor =
-            GraphemeCursor::new(self.grapheme_cursor.cur_cursor(), self.text.len(), true);
+        let cursor = self.grapheme_cursor.cur_cursor();
+        self.text.insert(cursor, ch);
+        self.grapheme_cursor = GraphemeCursor::new(cursor, self.text.len(), true);
         self.grapheme_cursor
-            .next_boundary(
-                &self.text[self.grapheme_cursor.cur_cursor()..],
-                self.grapheme_cursor.cur_cursor(),
-            )
+            .next_boundary(&self.text[cursor..], cursor)
             .unwrap();
     }
 
     pub fn on_backspace(&mut self) -> bool {
-        if self.grapheme_cursor.cur_cursor() > 0 {
+        let prev_cursor = self.grapheme_cursor.cur_cursor();
+        if prev_cursor > 0 {
             self.grapheme_cursor
-                .prev_boundary(&self.text[..self.grapheme_cursor.cur_cursor()], 0)
+                .prev_boundary(&self.text[..prev_cursor], 0)
                 .unwrap();
-            self.text.remove(self.grapheme_cursor.cur_cursor());
-            self.grapheme_cursor =
-                GraphemeCursor::new(self.grapheme_cursor.cur_cursor(), self.text.len(), true);
+
+            let new_cursor = self.grapheme_cursor.cur_cursor();
+            self.text.remove(new_cursor);
+            self.grapheme_cursor = GraphemeCursor::new(new_cursor, self.text.len(), true);
 
             true
         } else {
@@ -117,11 +118,10 @@ impl TextBoxState {
     }
 
     pub fn on_delete(&mut self) -> bool {
-        if self.grapheme_cursor.cur_cursor() < self.text.len() {
-            self.text.remove(self.grapheme_cursor.cur_cursor());
-            self.grapheme_cursor =
-                GraphemeCursor::new(self.grapheme_cursor.cur_cursor(), self.text.len(), true);
-
+        let cursor = self.grapheme_cursor.cur_cursor();
+        if cursor < self.text.len() {
+            self.text.remove(cursor);
+            self.grapheme_cursor = GraphemeCursor::new(cursor, self.text.len(), true);
             true
         } else {
             false
@@ -131,7 +131,7 @@ impl TextBoxState {
     pub fn on_left(&mut self) -> bool {
         let prev_cursor = self.grapheme_cursor.cur_cursor();
         self.grapheme_cursor
-            .prev_boundary(&self.text[..self.grapheme_cursor.cur_cursor()], 0)
+            .prev_boundary(&self.text[..prev_cursor], 0)
             .unwrap();
         self.grapheme_cursor.cur_cursor() < prev_cursor
     }
@@ -139,10 +139,7 @@ impl TextBoxState {
     pub fn on_right(&mut self) -> bool {
         let prev_cursor = self.grapheme_cursor.cur_cursor();
         self.grapheme_cursor
-            .next_boundary(
-                &self.text[self.grapheme_cursor.cur_cursor()..],
-                self.grapheme_cursor.cur_cursor(),
-            )
+            .next_boundary(&self.text[prev_cursor..], prev_cursor)
             .unwrap();
         self.grapheme_cursor.cur_cursor() > prev_cursor
     }
@@ -150,7 +147,6 @@ impl TextBoxState {
     pub fn on_home(&mut self) -> bool {
         if self.grapheme_cursor.cur_cursor() > 0 {
             self.grapheme_cursor = GraphemeCursor::new(0, self.text.len(), true);
-
             true
         } else {
             false
@@ -160,7 +156,6 @@ impl TextBoxState {
     pub fn on_end(&mut self) -> bool {
         if self.grapheme_cursor.cur_cursor() < self.text.len() {
             self.grapheme_cursor = GraphemeCursor::new(self.text.len(), self.text.len(), true);
-
             true
         } else {
             false
