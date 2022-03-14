@@ -6,7 +6,6 @@ use tui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 use unicode_segmentation::{GraphemeCursor, UnicodeSegmentation};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub struct TextBox<'b> {
     style: Style,
@@ -65,7 +64,6 @@ impl StatefulWidget for TextBox<'_> {
 pub struct TextBoxState {
     text: String,
     grapheme_cursor: GraphemeCursor,
-    char_cursor: usize,
 }
 
 impl TextBoxState {
@@ -79,7 +77,6 @@ impl TextBoxState {
         Self {
             text,
             grapheme_cursor: GraphemeCursor::new(len, len, true),
-            char_cursor: len,
         }
     }
 
@@ -90,7 +87,6 @@ impl TextBoxState {
     pub fn clear(&mut self) {
         self.text.clear();
         self.grapheme_cursor = GraphemeCursor::new(0, 0, true);
-        self.char_cursor = 0;
     }
 
     pub fn on_char(&mut self, ch: char) {
@@ -103,7 +99,6 @@ impl TextBoxState {
                 self.grapheme_cursor.cur_cursor(),
             )
             .unwrap();
-        self.char_cursor += UnicodeWidthChar::width(ch).unwrap_or(0);
     }
 
     pub fn on_backspace(&mut self) -> bool {
@@ -111,10 +106,9 @@ impl TextBoxState {
             self.grapheme_cursor
                 .prev_boundary(&self.text[..self.grapheme_cursor.cur_cursor()], 0)
                 .unwrap();
-            let c = self.text.remove(self.grapheme_cursor.cur_cursor());
+            self.text.remove(self.grapheme_cursor.cur_cursor());
             self.grapheme_cursor =
                 GraphemeCursor::new(self.grapheme_cursor.cur_cursor(), self.text.len(), true);
-            self.char_cursor -= UnicodeWidthChar::width(c).unwrap_or(0);
 
             true
         } else {
@@ -139,14 +133,7 @@ impl TextBoxState {
         self.grapheme_cursor
             .prev_boundary(&self.text[..self.grapheme_cursor.cur_cursor()], 0)
             .unwrap();
-        if self.grapheme_cursor.cur_cursor() < prev_cursor {
-            let str_slice = &self.text[self.grapheme_cursor.cur_cursor()..prev_cursor];
-            self.char_cursor -= UnicodeWidthStr::width(str_slice);
-
-            true
-        } else {
-            false
-        }
+        self.grapheme_cursor.cur_cursor() < prev_cursor
     }
 
     pub fn on_right(&mut self) -> bool {
@@ -157,20 +144,12 @@ impl TextBoxState {
                 self.grapheme_cursor.cur_cursor(),
             )
             .unwrap();
-        if self.grapheme_cursor.cur_cursor() > prev_cursor {
-            let str_slice = &self.text[prev_cursor..self.grapheme_cursor.cur_cursor()];
-            self.char_cursor += UnicodeWidthStr::width(str_slice);
-
-            true
-        } else {
-            false
-        }
+        self.grapheme_cursor.cur_cursor() > prev_cursor
     }
 
     pub fn on_home(&mut self) -> bool {
         if self.grapheme_cursor.cur_cursor() > 0 {
             self.grapheme_cursor = GraphemeCursor::new(0, self.text.len(), true);
-            self.char_cursor = 0;
 
             true
         } else {
@@ -181,7 +160,6 @@ impl TextBoxState {
     pub fn on_end(&mut self) -> bool {
         if self.grapheme_cursor.cur_cursor() < self.text.len() {
             self.grapheme_cursor = GraphemeCursor::new(self.text.len(), self.text.len(), true);
-            self.char_cursor = self.text.len();
 
             true
         } else {
@@ -195,7 +173,6 @@ impl Default for TextBoxState {
         Self {
             text: "".to_string(),
             grapheme_cursor: GraphemeCursor::new(0, 0, true),
-            char_cursor: 0,
         }
     }
 }
